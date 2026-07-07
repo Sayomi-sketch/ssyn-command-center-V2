@@ -131,7 +131,7 @@ button {
 
 .tab-nav {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   padding: 8px;
 }
@@ -280,6 +280,12 @@ select:focus {
   padding: 14px;
 }
 
+.warzone-card,
+.attendance-card,
+.archived-card {
+  background: #111111;
+}
+
 .player-top,
 .registration-top,
 .row-actions,
@@ -406,6 +412,10 @@ select:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.summary-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .summary-item {
   padding: 12px;
   border-radius: 16px;
@@ -478,8 +488,139 @@ select:focus {
   color: #b8ffce;
 }
 
+.attendance-controls {
+  align-items: stretch;
+}
+
+.attendance-card {
+  border-width: 1px;
+}
+
+.attendance-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.attendance-percent,
+.archived-meta {
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.attendance-history,
+.archived-details {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.attendance-gray {
+  border-color: #6b7280;
+}
+
+.attendance-green {
+  border-color: #22c55e;
+}
+
+.attendance-yellow {
+  border-color: #facc15;
+}
+
+.attendance-orange {
+  border-color: #fb923c;
+}
+
+.attendance-red {
+  border-color: #ef4444;
+}
+
+.warzone-status-group {
+  display: grid;
+  gap: 8px;
+}
+
+.radio-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+}
+
+.radio-pill.selected {
+  border-color: rgba(124, 58, 237, 0.7);
+  background: rgba(124, 58, 237, 0.16);
+}
+
+.radio-pill input {
+  width: auto;
+  margin: 0;
+}
+
+.history-entry {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.history-entry.selected {
+  border-color: rgba(124, 58, 237, 0.8);
+  background: rgba(124, 58, 237, 0.16);
+}
+
+.archived-chip {
+  background: rgba(107, 114, 128, 0.22);
+  color: #d1d5db;
+}
+
+.danger-btn {
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 4, 8, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 20;
+}
+
+.modal-card {
+  width: min(100%, 460px);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 700px) {
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-grid-4 {
     grid-template-columns: 1fr;
   }
 }

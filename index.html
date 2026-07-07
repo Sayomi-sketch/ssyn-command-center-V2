@@ -24,6 +24,8 @@
         <button class="tab-button active" data-target="roster-view">Alliance Roster</button>
         <button class="tab-button" data-target="desert-view">Desert Storm</button>
         <button class="tab-button" data-target="teams-view">Team Builder</button>
+        <button class="tab-button" data-target="warzone-view">Warzone</button>
+        <button class="tab-button" data-target="attendance-view">Attendance</button>
       </nav>
 
       <main class="content">
@@ -33,7 +35,10 @@
               <p class="eyebrow">Permanent roster</p>
               <h2>Alliance Roster</h2>
             </div>
-            <button class="primary-btn" id="toggle-roster-form">Add Player</button>
+            <div class="button-group">
+              <button class="secondary-btn" id="open-archived-view">Archived Players</button>
+              <button class="primary-btn" id="toggle-roster-form">Add Player</button>
+            </div>
           </div>
 
           <form id="roster-form" class="glass-card form-card">
@@ -154,7 +159,111 @@
             </div>
           </div>
         </section>
+
+        <section id="warzone-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Event tracking</p>
+              <h2>Warzone</h2>
+            </div>
+            <div class="button-group">
+              <button class="secondary-btn" id="toggle-warzone-history">History</button>
+              <button class="secondary-btn hidden" id="new-warzone">New Warzone</button>
+              <button class="primary-btn" id="save-warzone">Save Warzone</button>
+            </div>
+          </div>
+
+          <div class="glass-card form-card">
+            <div class="input-row">
+              <label>
+                Warzone Date
+                <input id="warzone-date" type="date" />
+              </label>
+              <label>
+                Opponent Server
+                <input id="warzone-opponent" placeholder="Server 641" />
+              </label>
+            </div>
+            <p class="helper-text" id="warzone-status-note">Set participation for each active player, then save the event.</p>
+          </div>
+
+          <div class="glass-card hidden" id="warzone-history-panel">
+            <div class="list-header">
+              <h3>Warzone History</h3>
+              <p>Select an event to view or edit saved participation.</p>
+            </div>
+            <div id="warzone-history-list" class="stack"></div>
+          </div>
+
+          <div class="glass-card">
+            <div class="list-header">
+              <h3>Player List</h3>
+              <p>Active players come directly from the Alliance Roster.</p>
+            </div>
+            <div id="warzone-player-list" class="stack"></div>
+          </div>
+        </section>
+
+        <section id="attendance-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Statistics only</p>
+              <h2>Attendance</h2>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div id="attendance-summary" class="summary-grid summary-grid-4"></div>
+          </div>
+
+          <div class="glass-card controls-card attendance-controls">
+            <input id="attendance-search" placeholder="Search player name" />
+            <select id="attendance-sort">
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+              <option value="attendance-desc">Attendance Highest-Lowest</option>
+              <option value="attendance-asc">Attendance Lowest-Highest</option>
+              <option value="thp-desc">THP Highest-Lowest</option>
+              <option value="thp-asc">THP Lowest-Highest</option>
+            </select>
+          </div>
+
+          <div id="attendance-list" class="stack"></div>
+        </section>
+
+        <section id="archived-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Archive</p>
+              <h2>Archived Players</h2>
+            </div>
+            <button class="secondary-btn" id="back-to-roster">Back to Roster</button>
+          </div>
+
+          <div class="glass-card">
+            <div class="list-header">
+              <h3>Archived Players</h3>
+              <p>Archived players stay out of active workflows while keeping their history intact.</p>
+            </div>
+            <div id="archived-list" class="stack"></div>
+          </div>
+        </section>
       </main>
+    </div>
+
+    <div id="archive-match-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="archive-match-title">
+      <div class="glass-card modal-card">
+        <div>
+          <p class="eyebrow">Archived player found</p>
+          <h3 id="archive-match-title">Restore Archived Player?</h3>
+        </div>
+        <p id="archive-match-message">This player already exists in the archive.</p>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="cancel-archive-match">Cancel</button>
+          <button class="secondary-btn" id="create-new-player">Create New Player</button>
+          <button class="primary-btn" id="restore-archived-player">Restore Player</button>
+        </div>
+      </div>
     </div>
 
     <!-- Firebase project configuration -->

@@ -1,19 +1,35 @@
-// Firestore-backed state. Real-time listeners will populate this.
+// Firestore-backed state. Real-time listeners populate the active collections.
 const state = {
   roster: [],
+  archived: [],
   desert: { eventDate: '', timeSlot: '18:00', registrations: {} },
-  teams: { assignments: {}, generated: false, lastSavedAt: '' }
+  teams: { assignments: {}, generated: false, lastSavedAt: '' },
+  warzone: {
+    events: [],
+    draft: { eventDate: getTodayInputValue(), opponentServer: '' },
+    selectedEventId: '',
+    historyOpen: false,
+    participations: {}
+  },
+  attendance: {
+    stats: {},
+    persistedSignature: ''
+  },
+  ui: {
+    pendingArchivedMatchId: '',
+    pendingPlayerDraft: null
+  }
 };
-
-function saveState() {
-  // no-op: individual operations write directly to Firestore via window.db
-}
 
 function init() {
   bindNavigation();
   bindRoster();
   bindDesert();
   bindTeams();
+  bindWarzone();
+  bindAttendance();
+  bindArchived();
+  bindArchiveModal();
   render();
   initFirebaseListeners();
 }
@@ -27,20 +43,37 @@ function initFirebaseListeners() {
   window.db.onRosterSnapshot((snap) => {
     const list = [];
     snap.forEach((doc) => {
-      const data = doc.data();
-      list.push({
-        id: doc.id,
-        name: data.name || '',
-        rank: data.rank || 'R1',
-        rankValue: data.rankValue || data.rank || 'R1',
-        rankSort: Number(data.rankSort) || Number(String(data.rank || 'R1').replace(/[^0-9]/g, '')) || 1,
-        thp: Number(data.thp) || 0
-      });
+      list.push(normalizePlayer(doc.id, doc.data()));
     });
     state.roster = list;
+    syncWarzoneDraftPlayers();
+    recomputeAttendanceStats();
     renderRoster();
     renderDesert();
     renderTeams();
+    renderWarzone();
+    renderAttendance();
+  });
+
+  window.db.onArchivedSnapshot((snap) => {
+    const list = [];
+    snap.forEach((doc) => {
+      const data = doc.data() || {};
+      list.push({
+        ...normalizePlayer(doc.id, data),
+        archivedAt: data.archivedAt || null,
+        lastKnownRank: data.lastKnownRank || data.rankValue || data.rank || 'R1',
+        lastKnownThp: Number(data.lastKnownThp ?? data.thp) || 0
+      });
+    });
+    state.archived = list.sort((left, right) => {
+      const a = valueToMillis(left.archivedAt);
+      const b = valueToMillis(right.archivedAt);
+      return b - a || left.name.localeCompare(right.name);
+    });
+    recomputeAttendanceStats();
+    renderArchived();
+    renderWarzone();
   });
 
   window.db.onRegistrationsSnapshot((snap) => {
@@ -56,9 +89,9 @@ function initFirebaseListeners() {
 
   window.db.onDesertMetaSnapshot((doc) => {
     if (!doc.exists) return;
-    const d = doc.data();
-    state.desert.eventDate = d.eventDate || '';
-    state.desert.timeSlot = d.timeSlot || '18:00';
+    const data = doc.data();
+    state.desert.eventDate = data.eventDate || '';
+    state.desert.timeSlot = data.timeSlot || '18:00';
     renderDesert();
   });
 
@@ -74,22 +107,54 @@ function initFirebaseListeners() {
 
   window.db.onTeamsMetaSnapshot((doc) => {
     if (!doc.exists) return;
-    const d = doc.data();
-    state.teams.generated = Boolean(d.generated);
-    state.teams.lastSavedAt = d.lastSavedAt || '';
+    const data = doc.data();
+    state.teams.generated = Boolean(data.generated);
+    state.teams.lastSavedAt = data.lastSavedAt || '';
     renderTeams();
+  });
+
+  window.db.onWarzonesSnapshot((snap) => {
+    const list = [];
+    snap.forEach((doc) => {
+      const data = doc.data() || {};
+      list.push({
+        id: doc.id,
+        eventDate: data.eventDate || '',
+        opponentServer: data.opponentServer || '',
+        participations: data.participations || {},
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null
+      });
+    });
+    state.warzone.events = list.sort((left, right) => right.eventDate.localeCompare(left.eventDate));
+    if (state.warzone.selectedEventId) {
+      const selected = state.warzone.events.find((entry) => entry.id === state.warzone.selectedEventId);
+      if (selected) {
+        hydrateWarzoneFromEvent(selected);
+      } else {
+        resetWarzoneDraft();
+      }
+    }
+    recomputeAttendanceStats();
+    renderWarzone();
+    renderAttendance();
+    renderArchived();
   });
 }
 
 function bindNavigation() {
   document.querySelectorAll('.tab-button').forEach((button) => {
-    button.addEventListener('click', () => {
-      document.querySelectorAll('.tab-button').forEach((item) => item.classList.remove('active'));
-      document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
-      button.classList.add('active');
-      document.getElementById(button.dataset.target).classList.add('active');
-    });
+    button.addEventListener('click', () => openView(button.dataset.target));
   });
+}
+
+function openView(targetId) {
+  document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
+  document.querySelectorAll('.tab-button').forEach((button) => {
+    button.classList.toggle('active', button.dataset.target === targetId);
+  });
+  const target = document.getElementById(targetId);
+  if (target) target.classList.add('active');
 }
 
 function bindRoster() {
@@ -105,12 +170,13 @@ function bindRoster() {
   });
 
   cancel.addEventListener('click', resetRosterForm);
+  document.getElementById('open-archived-view').addEventListener('click', () => openView('archived-view'));
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const id = document.getElementById('player-id').value || crypto.randomUUID();
+    const existingId = document.getElementById('player-id').value;
     const player = {
-      id,
+      id: existingId || crypto.randomUUID(),
       name: document.getElementById('player-name').value.trim(),
       rank: document.getElementById('player-rank').value,
       rankValue: document.getElementById('player-rank').value,
@@ -119,30 +185,21 @@ function bindRoster() {
 
     if (!player.name || !player.rank || Number.isNaN(player.thp)) return;
 
-    if (window.db && window.db.upsertPlayer) {
-      window.db.upsertPlayer(player).then(() => {
-        resetRosterForm();
-      }).catch((err) => console.error('Error saving player', err));
-    } else {
-      // fallback to local update for offline/editor preview
-      const existingId = document.getElementById('player-id').value;
-      if (existingId) {
-        state.roster = state.roster.map((entry) => (entry.id === existingId ? player : entry));
-      } else {
-        state.roster.push(player);
+    if (!existingId) {
+      const archivedMatch = findArchivedPlayerByName(player.name);
+      if (archivedMatch) {
+        state.ui.pendingArchivedMatchId = archivedMatch.id;
+        state.ui.pendingPlayerDraft = player;
+        openArchiveMatchModal(archivedMatch);
+        return;
       }
-      renderRoster();
-      resetRosterForm();
     }
+
+    saveRosterPlayer(player);
   });
 
   search.addEventListener('input', renderRoster);
   sort.addEventListener('change', renderRoster);
-}
-
-function resetRosterForm() {
-  document.getElementById('roster-form').reset();
-  document.getElementById('player-id').value = '';
 }
 
 function bindDesert() {
@@ -178,10 +235,60 @@ function bindTeams() {
   });
 }
 
+function bindWarzone() {
+  document.getElementById('warzone-date').addEventListener('change', (event) => {
+    state.warzone.draft.eventDate = event.target.value;
+    if (state.warzone.selectedEventId) persistSelectedWarzone();
+    renderWarzoneHeader();
+  });
+
+  document.getElementById('warzone-opponent').addEventListener('input', (event) => {
+    state.warzone.draft.opponentServer = event.target.value.trim();
+    if (state.warzone.selectedEventId) persistSelectedWarzone();
+    renderWarzoneHeader();
+  });
+
+  document.getElementById('save-warzone').addEventListener('click', saveWarzone);
+  document.getElementById('toggle-warzone-history').addEventListener('click', () => {
+    state.warzone.historyOpen = !state.warzone.historyOpen;
+    renderWarzone();
+  });
+  document.getElementById('new-warzone').addEventListener('click', resetWarzoneDraft);
+}
+
+function bindAttendance() {
+  document.getElementById('attendance-search').addEventListener('input', renderAttendance);
+  document.getElementById('attendance-sort').addEventListener('change', renderAttendance);
+}
+
+function bindArchived() {
+  document.getElementById('back-to-roster').addEventListener('click', () => openView('roster-view'));
+}
+
+function bindArchiveModal() {
+  document.getElementById('cancel-archive-match').addEventListener('click', closeArchiveMatchModal);
+  document.getElementById('create-new-player').addEventListener('click', () => {
+    const player = state.ui.pendingPlayerDraft;
+    closeArchiveMatchModal();
+    if (player) saveRosterPlayer(player, true);
+  });
+  document.getElementById('restore-archived-player').addEventListener('click', async () => {
+    const archivedId = state.ui.pendingArchivedMatchId;
+    closeArchiveMatchModal();
+    if (!archivedId) return;
+    if (window.db && window.db.restorePlayer) {
+      window.db.restorePlayer(archivedId).catch((err) => console.error('restore archived player', err));
+    }
+  });
+}
+
 function render() {
   renderRoster();
   renderDesert();
   renderTeams();
+  renderWarzone();
+  renderAttendance();
+  renderArchived();
 }
 
 function renderRoster() {
@@ -189,56 +296,34 @@ function renderRoster() {
   const search = document.getElementById('roster-search').value.toLowerCase();
   const sort = document.getElementById('roster-sort').value;
 
-  let players = [...state.roster].filter((player) => {
-    return [player.name, player.rank, String(player.thp)].some((value) => value.toLowerCase().includes(search));
-  });
-
-  players.sort((a, b) => {
-    const rankValue = (r) => {
-      try {
-        if (r.rankSort) return Number(r.rankSort) || 1;
-        return Number((r.rank || r.rankValue || 'R1').replace(/[^0-9]/g, '')) || 1;
-      } catch (e) { return 1; }
-    };
-
-    switch (sort) {
-      case 'thp-desc':
-        return b.thp - a.thp;
-      case 'thp-asc':
-        return a.thp - b.thp;
-      case 'rank-asc':
-        return rankValue(a) - rankValue(b) || a.name.localeCompare(b.name);
-      case 'rank-desc':
-        return rankValue(b) - rankValue(a) || a.name.localeCompare(b.name);
-      default:
-        return a.name.localeCompare(b.name);
-    }
-  });
+  const players = [...state.roster]
+    .filter((player) => [player.name, player.rank, String(player.thp)].some((value) => value.toLowerCase().includes(search)))
+    .sort((left, right) => sortPlayers(left, right, sort));
 
   if (!players.length) {
-    list.innerHTML = '<div class="list-empty">No players yet. Add the first roster member to begin.</div>';
+    list.innerHTML = '<div class="list-empty">No active players yet. Add the first roster member to begin.</div>';
     return;
   }
 
-  list.innerHTML = players.map((player) => {
-    // display modern rank badge
-    const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
-    const thpLabel = `THP ${player.thp}`;
-    return `
-      <article class="player-card">
-        <div class="player-top">
-          <div>
-            <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • ${thpLabel}</div>
-          </div>
+  list.innerHTML = players.map((player) => renderPlayerCard(player)).join('');
+}
+
+function renderPlayerCard(player) {
+  const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
+  return `
+    <article class="player-card">
+      <div class="player-top">
+        <div>
+          <div class="player-name">${escapeHtml(player.name)}</div>
+          <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${player.thp}</div>
         </div>
-        <div class="row-actions">
-          <button class="secondary-btn" onclick="editPlayer('${player.id}')">Edit</button>
-          <button class="secondary-btn" onclick="deletePlayer('${player.id}')">Delete</button>
-        </div>
-      </article>
-    `;
-  }).join('');
+      </div>
+      <div class="row-actions">
+        <button class="secondary-btn" onclick="editPlayer('${player.id}')">Edit</button>
+        <button class="secondary-btn" onclick="archivePlayer('${player.id}')">Archive Player</button>
+      </div>
+    </article>
+  `;
 }
 
 function renderDesert() {
@@ -317,9 +402,7 @@ function renderTeams() {
       legacySubs.push(player);
       return;
     }
-    if (poolMap[pool] !== undefined) {
-      poolMap[pool].push(player);
-    }
+    if (poolMap[pool] !== undefined) poolMap[pool].push(player);
   });
 
   legacySubs.forEach((player) => {
@@ -327,7 +410,6 @@ function renderTeams() {
     poolMap[targetPool || 'leftOut'].push(player);
   });
 
-  // Update THP summary
   const teamATHP = sumPlayers(poolMap.teamAStarter) + sumPlayers(poolMap.teamASub);
   const teamBTHP = sumPlayers(poolMap.teamBStarter) + sumPlayers(poolMap.teamBSub);
   const diff = Math.abs(teamATHP - teamBTHP);
@@ -380,12 +462,13 @@ function renderPoolCards(players, pool) {
   return players.map((player) => {
     const assignment = state.teams.assignments[player.id] || { pool, locked: false };
     const lockLabel = assignment.locked ? '🔒 Locked' : '🔓 Unlock';
+    const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
     return `
       <article class="team-player-card">
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${escapeHtml(player.rank || player.rankValue || 'R1')}">${escapeHtml(player.rank || player.rankValue || 'R1')}</span> • THP ${player.thp}</div>
+            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${player.thp}</div>
           </div>
           <div class="chip">${labelForPool(assignment.pool || pool)}</div>
         </div>
@@ -396,6 +479,429 @@ function renderPoolCards(players, pool) {
       </article>
     `;
   }).join('');
+}
+
+function renderWarzone() {
+  renderWarzoneHeader();
+
+  const historyPanel = document.getElementById('warzone-history-panel');
+  const newButton = document.getElementById('new-warzone');
+  historyPanel.classList.toggle('hidden', !state.warzone.historyOpen);
+  newButton.classList.toggle('hidden', !state.warzone.selectedEventId);
+
+  renderWarzoneHistory();
+  renderWarzonePlayers();
+}
+
+function renderWarzoneHeader() {
+  document.getElementById('warzone-date').value = state.warzone.draft.eventDate || '';
+  document.getElementById('warzone-opponent').value = state.warzone.draft.opponentServer || '';
+  const note = document.getElementById('warzone-status-note');
+  if (state.warzone.selectedEventId) {
+    note.textContent = 'Editing a saved Warzone. Participation and field changes autosave.';
+  } else {
+    note.textContent = 'Set participation for each active player, then save the event.';
+  }
+}
+
+function renderWarzoneHistory() {
+  const list = document.getElementById('warzone-history-list');
+  if (!state.warzone.events.length) {
+    list.innerHTML = '<div class="list-empty">No Warzone events saved yet.</div>';
+    return;
+  }
+
+  list.innerHTML = state.warzone.events.map((event) => `
+    <button class="history-entry ${event.id === state.warzone.selectedEventId ? 'selected' : ''}" data-event-id="${event.id}">
+      <span>${escapeHtml(formatDateLabel(event.eventDate))}</span>
+      <span>${escapeHtml(event.opponentServer || 'Opponent pending')}</span>
+    </button>
+  `).join('');
+
+  list.querySelectorAll('.history-entry').forEach((button) => {
+    button.addEventListener('click', () => {
+      const selected = state.warzone.events.find((entry) => entry.id === button.dataset.eventId);
+      if (!selected) return;
+      hydrateWarzoneFromEvent(selected);
+      renderWarzone();
+    });
+  });
+}
+
+function renderWarzonePlayers() {
+  const list = document.getElementById('warzone-player-list');
+  const players = getWarzoneRosterPlayers();
+  if (!players.length) {
+    list.innerHTML = '<div class="list-empty">Add active players to the Alliance Roster before recording a Warzone.</div>';
+    return;
+  }
+
+  list.innerHTML = players.map((player) => {
+    const participation = state.warzone.participations[player.id]?.status || '';
+    const rankLabel = escapeHtml(player.rank || player.rankValue || player.lastKnownRank || 'R1');
+    const archivedTag = player.archived ? '<span class="chip archived-chip">Archived</span>' : '';
+    return `
+      <article class="player-card warzone-card">
+        <div class="player-top">
+          <div>
+            <div class="player-name">${escapeHtml(player.name)}</div>
+            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${Number(player.thp ?? player.lastKnownThp) || 0}</div>
+          </div>
+          ${archivedTag}
+        </div>
+        <div class="warzone-status-group" role="radiogroup" aria-label="${escapeHtml(player.name)} participation status">
+          ${renderWarzoneOption(player.id, participation, 'participated', '🟢 Participated')}
+          ${renderWarzoneOption(player.id, participation, 'excused', '🟡 Excused')}
+          ${renderWarzoneOption(player.id, participation, 'missed', '🔴 Did Not Participate')}
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  list.querySelectorAll('input[type="radio"]').forEach((input) => {
+    input.addEventListener('change', (event) => {
+      const playerId = event.target.dataset.playerId;
+      const status = event.target.value;
+      const player = getWarzonePlayerById(playerId);
+      if (!player) return;
+      state.warzone.participations[playerId] = buildParticipationEntry(player, status);
+      if (state.warzone.selectedEventId) persistSelectedWarzone();
+      renderWarzonePlayers();
+      renderAttendance();
+    });
+  });
+}
+
+function renderWarzoneOption(playerId, currentStatus, value, label) {
+  const checked = currentStatus === value ? 'checked' : '';
+  const inputId = `warzone-${playerId}-${value}`;
+  return `
+    <label class="radio-pill ${checked ? 'selected' : ''}" for="${inputId}">
+      <input id="${inputId}" type="radio" name="warzone-status-${playerId}" data-player-id="${playerId}" value="${value}" ${checked} />
+      <span>${label}</span>
+    </label>
+  `;
+}
+
+function renderAttendance() {
+  renderAttendanceSummary();
+
+  const list = document.getElementById('attendance-list');
+  const search = document.getElementById('attendance-search').value.trim().toLowerCase();
+  const sort = document.getElementById('attendance-sort').value;
+
+  const players = state.roster
+    .filter((player) => player.name.toLowerCase().includes(search))
+    .sort((left, right) => compareAttendancePlayers(left, right, sort));
+
+  if (!players.length) {
+    list.innerHTML = '<div class="list-empty">No active players match the current search.</div>';
+    return;
+  }
+
+  list.innerHTML = players.map((player) => {
+    const stats = state.attendance.stats[player.id] || emptyAttendanceStat(player);
+    const borderClass = getAttendanceBorderClass(stats.attendancePercent);
+    const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
+    return `
+      <article class="player-card attendance-card ${borderClass}">
+        <div class="attendance-card-header">
+          <div class="player-name">${escapeHtml(player.name)}</div>
+          <div class="attendance-percent">${formatAttendancePercent(stats.attendancePercent)}</div>
+        </div>
+        <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${player.thp}</div>
+        <div class="attendance-history">${escapeHtml(formatAttendanceHistory(stats))}</div>
+      </article>
+    `;
+  }).join('');
+}
+
+function renderAttendanceSummary() {
+  const container = document.getElementById('attendance-summary');
+  const activeStats = state.roster.map((player) => state.attendance.stats[player.id] || emptyAttendanceStat(player));
+  const validAttendance = activeStats.filter((entry) => typeof entry.attendancePercent === 'number');
+  const average = validAttendance.length
+    ? validAttendance.reduce((sum, entry) => sum + entry.attendancePercent, 0) / validAttendance.length
+    : null;
+  const above90 = validAttendance.filter((entry) => entry.attendancePercent >= 90).length;
+  const below75 = validAttendance.filter((entry) => entry.attendancePercent < 75).length;
+
+  container.innerHTML = `
+    <div class="summary-item">
+      <div class="summary-label">Alliance Average Attendance</div>
+      <div class="summary-value">${formatAttendancePercent(average)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Warzones</div>
+      <div class="summary-value">${state.warzone.events.length}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Players Above 90%</div>
+      <div class="summary-value">${above90}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Players Below 75%</div>
+      <div class="summary-value">${below75}</div>
+    </div>
+  `;
+}
+
+function renderArchived() {
+  const list = document.getElementById('archived-list');
+  if (!state.archived.length) {
+    list.innerHTML = '<div class="list-empty">No archived players yet.</div>';
+    return;
+  }
+
+  list.innerHTML = state.archived.map((player) => {
+    const stats = state.attendance.stats[player.id] || emptyAttendanceStat(player);
+    const rankLabel = escapeHtml(player.lastKnownRank || player.rank || player.rankValue || 'R1');
+    return `
+      <article class="player-card archived-card">
+        <div class="player-top">
+          <div>
+            <div class="player-name">${escapeHtml(player.name)}</div>
+            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${Number(player.lastKnownThp ?? player.thp) || 0}</div>
+          </div>
+          <div class="archived-meta">${escapeHtml(formatAttendancePercent(stats.attendancePercent))}</div>
+        </div>
+        <div class="archived-details">
+          <div>Archived Date: ${escapeHtml(formatDateTimeLabel(player.archivedAt))}</div>
+          <div>Attendance: ${escapeHtml(formatAttendanceHistory(stats))}</div>
+        </div>
+        <div class="row-actions">
+          <button class="secondary-btn" onclick="restoreArchivedPlayer('${player.id}')">Restore Player</button>
+          <button class="secondary-btn danger-btn" onclick="deleteArchivedPlayerPermanently('${player.id}')">Delete Permanently</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+function saveRosterPlayer(player) {
+  if (window.db && window.db.upsertPlayer) {
+    window.db.upsertPlayer(player)
+      .then(() => resetRosterForm())
+      .catch((err) => console.error('Error saving player', err));
+    return;
+  }
+
+  const existingId = document.getElementById('player-id').value;
+  if (existingId) {
+    state.roster = state.roster.map((entry) => (entry.id === existingId ? player : entry));
+  } else {
+    state.roster.push(player);
+  }
+  resetRosterForm();
+  renderRoster();
+}
+
+function saveWarzone() {
+  const eventDate = state.warzone.draft.eventDate;
+  const opponentServer = state.warzone.draft.opponentServer.trim();
+  if (!eventDate || !opponentServer) return;
+
+  const activePlayers = state.roster;
+  const participationMap = { ...state.warzone.participations };
+  activePlayers.forEach((player) => {
+    if (!participationMap[player.id]) {
+      participationMap[player.id] = buildParticipationEntry(player, 'missed');
+    }
+  });
+  state.warzone.participations = participationMap;
+
+  const isExisting = Boolean(state.warzone.selectedEventId);
+  const eventId = state.warzone.selectedEventId || crypto.randomUUID();
+  const payload = {
+    eventDate,
+    opponentServer,
+    participations: participationMap
+  };
+  if (!isExisting && window.db && window.db.serverTimestamp) {
+    payload.createdAt = window.db.serverTimestamp();
+  }
+
+  if (window.db && window.db.upsertWarzoneEvent) {
+    window.db.upsertWarzoneEvent(eventId, payload)
+      .then(() => {
+        state.warzone.selectedEventId = eventId;
+        renderWarzone();
+      })
+      .catch((err) => console.error('save warzone', err));
+    return;
+  }
+
+  upsertWarzoneLocally(eventId, payload);
+}
+
+function persistSelectedWarzone() {
+  if (!state.warzone.selectedEventId || !(window.db && window.db.upsertWarzoneEvent)) return;
+  window.db.upsertWarzoneEvent(state.warzone.selectedEventId, {
+    eventDate: state.warzone.draft.eventDate,
+    opponentServer: state.warzone.draft.opponentServer,
+    participations: state.warzone.participations
+  }).catch((err) => console.error('autosave warzone', err));
+}
+
+function resetRosterForm() {
+  document.getElementById('roster-form').reset();
+  document.getElementById('player-id').value = '';
+  document.getElementById('roster-form').classList.add('hidden');
+}
+
+function resetWarzoneDraft() {
+  state.warzone.selectedEventId = '';
+  state.warzone.draft = { eventDate: getTodayInputValue(), opponentServer: '' };
+  state.warzone.participations = {};
+  syncWarzoneDraftPlayers();
+  renderWarzone();
+}
+
+function hydrateWarzoneFromEvent(event) {
+  state.warzone.selectedEventId = event.id;
+  state.warzone.draft = {
+    eventDate: event.eventDate || getTodayInputValue(),
+    opponentServer: event.opponentServer || ''
+  };
+  state.warzone.participations = cloneParticipations(event.participations || {});
+}
+
+function syncWarzoneDraftPlayers() {
+  if (state.warzone.selectedEventId) return;
+  const nextParticipations = {};
+  state.roster.forEach((player) => {
+    nextParticipations[player.id] = state.warzone.participations[player.id]
+      ? { ...state.warzone.participations[player.id], name: player.name, rank: player.rankValue || player.rank || 'R1', thp: Number(player.thp) || 0 }
+      : buildParticipationEntry(player, '');
+  });
+  state.warzone.participations = nextParticipations;
+}
+
+function buildParticipationEntry(player, status) {
+  return {
+    status,
+    name: player.name,
+    rank: player.rankValue || player.rank || player.lastKnownRank || 'R1',
+    thp: Number(player.thp ?? player.lastKnownThp) || 0
+  };
+}
+
+function recomputeAttendanceStats() {
+  const directory = buildPlayerDirectory();
+  const stats = {};
+
+  Object.values(directory).forEach((player) => {
+    stats[player.id] = emptyAttendanceStat(player);
+  });
+
+  state.warzone.events.forEach((event) => {
+    Object.entries(event.participations || {}).forEach(([playerId, entry]) => {
+      const base = directory[playerId] || normalizePlayer(playerId, entry || {});
+      const stat = stats[playerId] || emptyAttendanceStat(base);
+      stat.playerId = playerId;
+      stat.name = base.name || entry.name || '';
+      stat.rank = base.rankValue || base.rank || entry.rank || 'R1';
+      stat.thp = Number(base.thp ?? entry.thp) || 0;
+      stat.recordedWarzones += 1;
+
+      if (entry.status === 'participated') stat.participated += 1;
+      if (entry.status === 'excused') stat.excused += 1;
+      if (entry.status === 'missed') stat.missed += 1;
+
+      stat.eligibleWarzones = Math.max(0, stat.recordedWarzones - stat.excused);
+      stat.attendancePercent = stat.eligibleWarzones > 0
+        ? (stat.participated / stat.eligibleWarzones) * 100
+        : null;
+      stats[playerId] = stat;
+    });
+  });
+
+  state.attendance.stats = stats;
+  persistAttendanceStats(stats);
+}
+
+function persistAttendanceStats(stats) {
+  const serializable = {};
+  Object.entries(stats).forEach(([playerId, entry]) => {
+    serializable[playerId] = {
+      playerId,
+      name: entry.name,
+      rank: entry.rank,
+      thp: entry.thp,
+      participated: entry.participated,
+      excused: entry.excused,
+      missed: entry.missed,
+      recordedWarzones: entry.recordedWarzones,
+      eligibleWarzones: entry.eligibleWarzones,
+      attendancePercent: entry.attendancePercent
+    };
+  });
+  const signature = JSON.stringify(serializable);
+  if (signature === state.attendance.persistedSignature) return;
+  state.attendance.persistedSignature = signature;
+
+  if (window.db && window.db.setAttendanceStats) {
+    window.db.setAttendanceStats(serializable).catch((err) => console.error('attendance stats', err));
+  }
+}
+
+function emptyAttendanceStat(player) {
+  return {
+    playerId: player.id,
+    name: player.name || '',
+    rank: player.rankValue || player.rank || player.lastKnownRank || 'R1',
+    thp: Number(player.thp ?? player.lastKnownThp) || 0,
+    participated: 0,
+    excused: 0,
+    missed: 0,
+    recordedWarzones: 0,
+    eligibleWarzones: 0,
+    attendancePercent: null
+  };
+}
+
+function compareAttendancePlayers(left, right, sort) {
+  const leftStats = state.attendance.stats[left.id] || emptyAttendanceStat(left);
+  const rightStats = state.attendance.stats[right.id] || emptyAttendanceStat(right);
+  const leftAttendance = leftStats.attendancePercent ?? -1;
+  const rightAttendance = rightStats.attendancePercent ?? -1;
+
+  switch (sort) {
+    case 'name-desc':
+      return right.name.localeCompare(left.name);
+    case 'attendance-desc':
+      return rightAttendance - leftAttendance || left.name.localeCompare(right.name);
+    case 'attendance-asc':
+      return leftAttendance - rightAttendance || left.name.localeCompare(right.name);
+    case 'thp-desc':
+      return right.thp - left.thp || left.name.localeCompare(right.name);
+    case 'thp-asc':
+      return left.thp - right.thp || left.name.localeCompare(right.name);
+    default:
+      return left.name.localeCompare(right.name);
+  }
+}
+
+function formatAttendancePercent(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--';
+  return `${value.toFixed(1)}%`;
+}
+
+function formatAttendanceHistory(stats) {
+  if (!stats.recordedWarzones) return 'No attendance history';
+  return `${stats.participated} / ${stats.eligibleWarzones} Warzones`;
+}
+
+function getAttendanceBorderClass(percent) {
+  if (typeof percent !== 'number') return 'attendance-gray';
+  if (percent >= 90) return 'attendance-green';
+  if (percent >= 75) return 'attendance-yellow';
+  if (percent >= 50) return 'attendance-orange';
+  return 'attendance-red';
+}
+
+function renderTeamSummary() {
+  renderTeams();
 }
 
 function generateTeams() {
@@ -460,11 +966,7 @@ function generateTeams() {
   const subFillResult = assignBalancedGroup(otherSubPlayers, poolState, ['teamASub', 'teamBSub'], getOpenSlots(poolState, ['teamASub', 'teamBSub'], 10), false);
   placePlayers(poolState, subFillResult.assignments);
 
-  [
-    ...guaranteedSubResult.unassigned,
-    ...leaderSubResult.unassigned,
-    ...subFillResult.unassigned
-  ].forEach((player) => {
+  [...guaranteedSubResult.unassigned, ...leaderSubResult.unassigned, ...subFillResult.unassigned].forEach((player) => {
     poolState.leftOut.push(player);
   });
 
@@ -480,10 +982,7 @@ function generateTeams() {
   allPoolPlayers.forEach((player) => {
     const previousEntry = assignments[player.id];
     const pool = getPoolForPlayer(player, poolState);
-    nextAssignments[player.id] = {
-      pool,
-      locked: Boolean(previousEntry?.locked)
-    };
+    nextAssignments[player.id] = { pool, locked: Boolean(previousEntry?.locked) };
   });
 
   allPoolPlayers.forEach((player) => {
@@ -494,7 +993,6 @@ function generateTeams() {
     }
   });
 
-  // Persist assignments and updated registrations to Firestore
   state.teams.assignments = nextAssignments;
   state.teams.generated = true;
 
@@ -503,10 +1001,9 @@ function generateTeams() {
     window.db.batchAssignments(nextAssignments, meta).catch((err) => console.error('batch assign', err));
   }
 
-  // update registrations for left-out players
   Object.entries(state.desert.registrations).forEach(([playerId, reg]) => {
-    if (reg.guaranteed) {
-      if (window.db && window.db.setRegistration) window.db.setRegistration(playerId, reg).catch((err) => console.error(err));
+    if (reg.guaranteed && window.db && window.db.setRegistration) {
+      window.db.setRegistration(playerId, reg).catch((err) => console.error(err));
     }
   });
 }
@@ -522,11 +1019,8 @@ function getPoolForPlayer(player, poolState) {
 function getIncludedPlayers() {
   const ids = new Set();
   Object.entries(state.desert.registrations).forEach(([playerId, registration]) => {
-    if (registration.requested) {
-      ids.add(playerId);
-    }
+    if (registration.requested) ids.add(playerId);
   });
-
   return state.roster.filter((player) => ids.has(player.id));
 }
 
@@ -549,6 +1043,80 @@ function movePlayer(playerId) {
     window.db.setTeamAssignment(playerId, updated).catch((err) => console.error('move save', err));
   }
   renderTeams();
+}
+
+function archivePlayer(playerId) {
+  const player = state.roster.find((entry) => entry.id === playerId);
+  if (!player) return;
+  const attendance = state.attendance.stats[playerId] || emptyAttendanceStat(player);
+  if (window.db && window.db.archivePlayer) {
+    window.db.archivePlayer(player, attendance).catch((err) => console.error('archive player', err));
+    return;
+  }
+
+  state.roster = state.roster.filter((entry) => entry.id !== playerId);
+  state.archived.unshift({
+    ...player,
+    archivedAt: new Date().toISOString(),
+    lastKnownRank: player.rankValue || player.rank || 'R1',
+    lastKnownThp: Number(player.thp) || 0
+  });
+  delete state.desert.registrations[playerId];
+  delete state.teams.assignments[playerId];
+  delete state.warzone.participations[playerId];
+  syncWarzoneDraftPlayers();
+  recomputeAttendanceStats();
+  render();
+}
+
+function restoreArchivedPlayer(playerId) {
+  if (window.db && window.db.restorePlayer) {
+    window.db.restorePlayer(playerId).catch((err) => console.error('restore archived player', err));
+    return;
+  }
+
+  const player = state.archived.find((entry) => entry.id === playerId);
+  if (!player) return;
+  state.archived = state.archived.filter((entry) => entry.id !== playerId);
+  state.roster.push(normalizePlayer(player.id, player));
+  syncWarzoneDraftPlayers();
+  recomputeAttendanceStats();
+  render();
+}
+
+function deleteArchivedPlayerPermanently(playerId) {
+  if (!window.confirm('Delete this archived player permanently? This cannot be undone.')) return;
+  if (window.db && window.db.permanentlyDeleteArchivedPlayer) {
+    window.db.permanentlyDeleteArchivedPlayer(playerId).catch((err) => console.error('delete archived player', err));
+    return;
+  }
+
+  state.archived = state.archived.filter((entry) => entry.id !== playerId);
+  state.warzone.events = state.warzone.events.map((event) => {
+    if (!event.participations || !event.participations[playerId]) return event;
+    const nextParticipations = { ...event.participations };
+    delete nextParticipations[playerId];
+    return { ...event, participations: nextParticipations };
+  });
+  delete state.attendance.stats[playerId];
+  if (state.warzone.selectedEventId) {
+    delete state.warzone.participations[playerId];
+  }
+  recomputeAttendanceStats();
+  renderArchived();
+  renderWarzone();
+  renderAttendance();
+}
+
+function editPlayer(playerId) {
+  const player = state.roster.find((entry) => entry.id === playerId);
+  if (!player) return;
+  document.getElementById('player-id').value = player.id;
+  document.getElementById('player-name').value = player.name;
+  document.getElementById('player-rank').value = player.rankValue || player.rank;
+  document.getElementById('player-thp').value = player.thp;
+  document.getElementById('roster-form').classList.remove('hidden');
+  document.getElementById('player-name').focus();
 }
 
 function getNextPool(currentPool) {
@@ -653,81 +1221,176 @@ function assignBalancedGroup(players, poolState, pools, slotsByPool, mustPlace) 
     const remaining = sortedPlayers.length - index - 1;
     const nextStates = [];
 
-    beam.forEach((state) => {
-      const placedCount = state.assignments.length;
+    beam.forEach((entry) => {
+      const placedCount = entry.assignments.length;
 
       pools.forEach((pool) => {
-        if (state.counts[pool] >= (slotsByPool[pool] || 0)) return;
-        const nextCounts = { ...state.counts, [pool]: state.counts[pool] + 1 };
+        if (entry.counts[pool] >= (slotsByPool[pool] || 0)) return;
+        const nextCounts = { ...entry.counts, [pool]: entry.counts[pool] + 1 };
         nextStates.push({
-          assignments: [...state.assignments, { player, pool }],
-          skipped: state.skipped,
+          assignments: [...entry.assignments, { player, pool }],
+          skipped: entry.skipped,
           counts: nextCounts,
-          thpA: state.thpA + (pool.startsWith('teamA') ? Number(player.thp) || 0 : 0),
-          thpB: state.thpB + (pool.startsWith('teamB') ? Number(player.thp) || 0 : 0)
+          thpA: entry.thpA + (pool.startsWith('teamA') ? Number(player.thp) || 0 : 0),
+          thpB: entry.thpB + (pool.startsWith('teamB') ? Number(player.thp) || 0 : 0)
         });
       });
 
       if (!mustPlace || placedCount + remaining >= requiredCount) {
         nextStates.push({
-          assignments: state.assignments,
-          skipped: [...state.skipped, player],
-          counts: state.counts,
-          thpA: state.thpA,
-          thpB: state.thpB
+          assignments: entry.assignments,
+          skipped: [...entry.skipped, player],
+          counts: entry.counts,
+          thpA: entry.thpA,
+          thpB: entry.thpB
         });
       }
     });
 
     beam = nextStates
-      .filter((state) => state.assignments.length <= requiredCount && state.assignments.length + remaining >= requiredCount)
+      .filter((entry) => entry.assignments.length <= requiredCount && entry.assignments.length + remaining >= requiredCount)
       .sort((left, right) => scoreBeamState(left, requiredCount) - scoreBeamState(right, requiredCount))
       .slice(0, beamWidth);
   });
 
   const bestState = beam
-    .filter((state) => state.assignments.length === requiredCount)
+    .filter((entry) => entry.assignments.length === requiredCount)
     .sort((left, right) => scoreBeamState(left, requiredCount) - scoreBeamState(right, requiredCount))[0];
 
-  if (!bestState) {
-    return { assignments: [], unassigned: sortedPlayers };
-  }
+  if (!bestState) return { assignments: [], unassigned: sortedPlayers };
 
-  return {
-    assignments: bestState.assignments,
-    unassigned: bestState.skipped
-  };
+  return { assignments: bestState.assignments, unassigned: bestState.skipped };
 }
 
-function scoreBeamState(state, requiredCount) {
-  const diff = Math.abs(state.thpA - state.thpB);
-  const remainingPenalty = (requiredCount - state.assignments.length) * 1000000;
-  const teamACount = (state.counts.teamAStarter || 0) + (state.counts.teamASub || 0);
-  const teamBCount = (state.counts.teamBStarter || 0) + (state.counts.teamBSub || 0);
+function scoreBeamState(stateEntry, requiredCount) {
+  const diff = Math.abs(stateEntry.thpA - stateEntry.thpB);
+  const remainingPenalty = (requiredCount - stateEntry.assignments.length) * 1000000;
+  const teamACount = (stateEntry.counts.teamAStarter || 0) + (stateEntry.counts.teamASub || 0);
+  const teamBCount = (stateEntry.counts.teamBStarter || 0) + (stateEntry.counts.teamBSub || 0);
   const countPenalty = Math.abs(teamACount - teamBCount);
   return diff + remainingPenalty + countPenalty;
 }
 
-function editPlayer(playerId) {
-  const player = state.roster.find((entry) => entry.id === playerId);
-  if (!player) return;
-  document.getElementById('player-id').value = player.id;
-  document.getElementById('player-name').value = player.name;
-  document.getElementById('player-rank').value = player.rank;
-  document.getElementById('player-thp').value = player.thp;
-  document.getElementById('roster-form').classList.remove('hidden');
-  document.getElementById('player-name').focus();
+function sortPlayers(left, right, sort) {
+  switch (sort) {
+    case 'thp-desc':
+      return right.thp - left.thp;
+    case 'thp-asc':
+      return left.thp - right.thp;
+    case 'rank-asc':
+      return rankSortValue(left) - rankSortValue(right) || left.name.localeCompare(right.name);
+    case 'rank-desc':
+      return rankSortValue(right) - rankSortValue(left) || left.name.localeCompare(right.name);
+    default:
+      return left.name.localeCompare(right.name);
+  }
 }
 
-function deletePlayer(playerId) {
-  if (window.db && window.db.deletePlayer) {
-    window.db.deletePlayer(playerId).catch((err) => console.error('delete player', err));
+function rankSortValue(player) {
+  return Number(player.rankSort) || Number(String(player.rank || player.rankValue || 'R1').replace(/[^0-9]/g, '')) || 1;
+}
+
+function normalizePlayer(id, data) {
+  return {
+    id,
+    name: data.name || '',
+    rank: data.rank || data.rankValue || data.lastKnownRank || 'R1',
+    rankValue: data.rankValue || data.rank || data.lastKnownRank || 'R1',
+    rankSort: Number(data.rankSort) || Number(String(data.rank || data.rankValue || data.lastKnownRank || 'R1').replace(/[^0-9]/g, '')) || 1,
+    thp: Number(data.thp ?? data.lastKnownThp) || 0,
+    createdAt: data.createdAt || null
+  };
+}
+
+function buildPlayerDirectory() {
+  const directory = {};
+  [...state.roster, ...state.archived].forEach((player) => {
+    directory[player.id] = { ...player };
+  });
+  state.warzone.events.forEach((event) => {
+    Object.entries(event.participations || {}).forEach(([playerId, entry]) => {
+      if (!directory[playerId]) {
+        directory[playerId] = normalizePlayer(playerId, entry || {});
+      }
+    });
+  });
+  return directory;
+}
+
+function getWarzoneRosterPlayers() {
+  return [...state.roster].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function getWarzonePlayerById(playerId) {
+  return getWarzoneRosterPlayers().find((player) => player.id === playerId) || state.roster.find((player) => player.id === playerId) || state.archived.find((player) => player.id === playerId);
+}
+
+function cloneParticipations(participations) {
+  const clone = {};
+  Object.entries(participations || {}).forEach(([playerId, entry]) => {
+    clone[playerId] = { ...entry };
+  });
+  return clone;
+}
+
+function upsertWarzoneLocally(eventId, payload) {
+  const existingIndex = state.warzone.events.findIndex((entry) => entry.id === eventId);
+  const nextEvent = { id: eventId, ...payload };
+  if (existingIndex >= 0) {
+    state.warzone.events.splice(existingIndex, 1, nextEvent);
   } else {
-    state.roster = state.roster.filter((player) => player.id !== playerId);
-    delete state.desert.registrations[playerId];
-    delete state.teams.assignments[playerId];
-    render();
+    state.warzone.events.unshift(nextEvent);
   }
+  hydrateWarzoneFromEvent(nextEvent);
+  recomputeAttendanceStats();
+  renderWarzone();
+  renderAttendance();
+  renderArchived();
+}
+
+function findArchivedPlayerByName(name) {
+  const normalized = normalizeName(name);
+  return state.archived.find((player) => normalizeName(player.name) === normalized) || null;
+}
+
+function normalizeName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function openArchiveMatchModal(player) {
+  document.getElementById('archive-match-message').textContent = `This player already exists in the archive. Would you like to restore ${player.name} instead?`;
+  document.getElementById('archive-match-modal').classList.remove('hidden');
+}
+
+function closeArchiveMatchModal() {
+  state.ui.pendingArchivedMatchId = '';
+  state.ui.pendingPlayerDraft = null;
+  document.getElementById('archive-match-modal').classList.add('hidden');
+}
+
+function formatDateLabel(value) {
+  if (!value) return 'No date';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) return 'Unknown';
+  const millis = valueToMillis(value);
+  if (!millis) return 'Unknown';
+  return new Date(millis).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function valueToMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function getTodayInputValue() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function escapeHtml(value) {
@@ -740,3 +1403,10 @@ function escapeHtml(value) {
 }
 
 init();
+
+window.editPlayer = editPlayer;
+window.archivePlayer = archivePlayer;
+window.toggleLock = toggleLock;
+window.movePlayer = movePlayer;
+window.restoreArchivedPlayer = restoreArchivedPlayer;
+window.deleteArchivedPlayerPermanently = deleteArchivedPlayerPermanently;
