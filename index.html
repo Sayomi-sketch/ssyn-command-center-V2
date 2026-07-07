@@ -45,7 +45,13 @@
               </label>
               <label>
                 Rank
-                <input id="player-rank" required placeholder="e.g. Captain" />
+                <select id="player-rank" required>
+                  <option value="R5">R5</option>
+                  <option value="R4">R4</option>
+                  <option value="R3">R3</option>
+                  <option value="R2">R2</option>
+                  <option value="R1">R1</option>
+                </select>
               </label>
             </div>
             <div class="input-row single">
@@ -121,8 +127,10 @@
           </div>
 
           <div class="glass-card info-card">
-            <p>Only requested players are eligible. Guaranteed players are always included, and left out players become guaranteed next round.</p>
+            <p>Only players marked Requested to Fight are eligible. Guaranteed players are placed into the starter lineup first, and left out players become guaranteed next round.</p>
           </div>
+
+          <div id="team-summary" class="glass-card"></div>
 
           <div class="team-grid">
             <div class="glass-card team-column">

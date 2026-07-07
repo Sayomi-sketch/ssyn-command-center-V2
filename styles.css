@@ -293,6 +293,14 @@ select:focus {
 .registration-meta {
   color: var(--muted);
   font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stat-divider {
+  color: var(--text);
 }
 
 .chip-row {
@@ -365,8 +373,88 @@ select:focus {
   margin-top: 8px;
 }
 
+.summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summary-item {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.summary-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: #111111;
+  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 0 12px rgba(124, 58, 237, 0.18);
+  color: #f9fafb;
+}
+
+.rank-badge.rank-r5 {
+  color: #f5e8ff;
+  border-color: #9333ea;
+  box-shadow: 0 0 0 1px rgba(147, 51, 234, 0.2), 0 0 12px rgba(147, 51, 234, 0.28);
+}
+
+.rank-badge.rank-r4 {
+  color: #fdf2ff;
+  border-color: #c084fc;
+  box-shadow: 0 0 0 1px rgba(192, 132, 252, 0.2), 0 0 12px rgba(192, 132, 252, 0.25);
+}
+
+.rank-badge.rank-r3 {
+  color: #eff6ff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2), 0 0 12px rgba(59, 130, 246, 0.25);
+}
+
+.rank-badge.rank-r2 {
+  color: #fff7ed;
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.2), 0 0 12px rgba(249, 115, 22, 0.25);
+}
+
+.rank-badge.rank-r1 {
+  color: #ffffff;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 1px rgba(107, 114, 128, 0.2), 0 0 12px rgba(107, 114, 128, 0.2);
+}
+
 .saved-badge {
   color: #b8ffce;
+}
+
+@media (max-width: 700px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 700px) {

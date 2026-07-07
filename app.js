@@ -79,18 +79,21 @@ function bindRoster() {
     form.classList.toggle('hidden');
   });
 
-  cancel.addEventListener('click', resetRosterForm);
+  cancel.addEventListener('click', () => {
+    resetRosterForm();
+    form.classList.add('hidden');
+  });
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const player = {
       id: document.getElementById('player-id').value || crypto.randomUUID(),
       name: document.getElementById('player-name').value.trim(),
-      rank: document.getElementById('player-rank').value.trim(),
+      rank: normalizeRank(document.getElementById('player-rank').value),
       thp: Number(document.getElementById('player-thp').value)
     };
 
-    if (!player.name || !player.rank || Number.isNaN(player.thp)) {
+    if (!player.name || Number.isNaN(player.thp)) {
       return;
     }
 
@@ -104,6 +107,7 @@ function bindRoster() {
     saveState();
     renderRoster();
     resetRosterForm();
+    form.classList.add('hidden');
   });
 
   search.addEventListener('input', renderRoster);
@@ -111,8 +115,10 @@ function bindRoster() {
 }
 
 function resetRosterForm() {
-  document.getElementById('roster-form').reset();
+  const form = document.getElementById('roster-form');
+  form.reset();
   document.getElementById('player-id').value = '';
+  document.getElementById('player-rank').value = 'R1';
 }
 
 function bindDesert() {
@@ -158,7 +164,7 @@ function renderRoster() {
   const sort = document.getElementById('roster-sort').value;
 
   let players = [...state.roster].filter((player) => {
-    return [player.name, player.rank, String(player.thp)].some((value) => value.toLowerCase().includes(search));
+    return [player.name, player.rank, String(player.thp)].some((value) => String(value).toLowerCase().includes(search));
   });
 
   players.sort((a, b) => {
@@ -168,7 +174,7 @@ function renderRoster() {
       case 'thp-asc':
         return a.thp - b.thp;
       case 'rank':
-        return a.rank.localeCompare(b.rank);
+        return normalizeRank(a.rank).localeCompare(normalizeRank(b.rank));
       default:
         return a.name.localeCompare(b.name);
     }
@@ -180,17 +186,15 @@ function renderRoster() {
   }
 
   list.innerHTML = players.map((player) => {
-    const registrationState = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
     return `
       <article class="player-card">
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats">${escapeHtml(player.rank)} • THP ${player.thp}</div>
-          </div>
-          <div class="chip-row">
-            <span class="chip">${registrationState.requested ? 'Requested' : 'Standby'}</span>
-            <span class="chip">${registrationState.guaranteed ? 'Guaranteed' : 'Open'}</span>
+            <div class="player-stats">
+              ${renderRankBadge(player.rank)}
+              <span class="stat-divider">THP ${player.thp}</span>
+            </div>
           </div>
         </div>
         <div class="row-actions">
@@ -222,9 +226,8 @@ function renderDesert() {
         <div class="registration-top">
           <div>
             <div class="registration-name">${escapeHtml(player.name)}</div>
-            <div class="registration-meta">${escapeHtml(player.rank)} • THP ${player.thp}</div>
+            <div class="registration-meta">${renderRankBadge(player.rank)} <span class="stat-divider">THP ${player.thp}</span></div>
           </div>
-          <div class="chip">${registration.guaranteed ? 'Guaranteed' : 'Open'}</div>
         </div>
         <div class="checkbox-block">
           <label>
@@ -259,6 +262,7 @@ function renderTeams() {
   const teamBList = document.getElementById('team-b-list');
   const subsList = document.getElementById('subs-list');
   const leftOutList = document.getElementById('left-out-list');
+  const summary = document.getElementById('team-summary');
 
   const assignments = state.teams.assignments || {};
   const includedPlayers = getIncludedPlayers();
@@ -271,14 +275,36 @@ function renderTeams() {
 
   includedPlayers.forEach((player) => {
     const assignment = assignments[player.id] || { pool: 'leftOut', locked: false };
-    if (poolMap[assignment.pool] !== undefined) {
-      poolMap[assignment.pool].push(player);
+    const pool = assignment.pool || 'leftOut';
+    if (poolMap[pool] !== undefined) {
+      poolMap[pool].push(player);
     }
   });
 
+  const teamAThp = poolMap.teamA.reduce((sum, entry) => sum + entry.thp, 0);
+  const teamBThp = poolMap.teamB.reduce((sum, entry) => sum + entry.thp, 0);
+  const thpDifference = Math.abs(teamAThp - teamBThp);
+
+  summary.innerHTML = `
+    <div class="summary-grid">
+      <div class="summary-item">
+        <span class="summary-label">Total THP Team A</span>
+        <span class="summary-value">${teamAThp}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total THP Team B</span>
+        <span class="summary-value">${teamBThp}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">THP Difference</span>
+        <span class="summary-value">${thpDifference}</span>
+      </div>
+    </div>
+  `;
+
   if (!includedPlayers.length) {
     [teamAList, teamBList, subsList, leftOutList].forEach((element) => {
-      element.innerHTML = '<div class="list-empty">No eligible players yet. Mark players as requested or guaranteed in Desert Storm.</div>';
+      element.innerHTML = '<div class="list-empty">No eligible players yet. Mark players as Requested to Fight in Desert Storm.</div>';
     });
     return;
   }
@@ -303,7 +329,7 @@ function renderPool(container, players, pool) {
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats">${escapeHtml(player.rank)} • THP ${player.thp}</div>
+            <div class="player-stats">${renderRankBadge(player.rank)} <span class="stat-divider">THP ${player.thp}</span></div>
           </div>
           <div class="chip">${labelForPool(assignment.pool || pool)}</div>
         </div>
@@ -335,33 +361,43 @@ function generateTeams() {
   });
 
   const availablePlayers = eligiblePlayers.filter((player) => !assignments[player.id]?.locked);
-  const guaranteedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.guaranteed);
-  const requestedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.requested && !state.desert.registrations[player.id]?.guaranteed);
+  const orderedPlayers = [...availablePlayers].sort((playerA, playerB) => {
+    const registrationA = state.desert.registrations[playerA.id] || { requested: false, guaranteed: false };
+    const registrationB = state.desert.registrations[playerB.id] || { requested: false, guaranteed: false };
+    const guaranteedDiff = Number(registrationB.guaranteed) - Number(registrationA.guaranteed);
+    if (guaranteedDiff !== 0) {
+      return guaranteedDiff;
+    }
+    return playerB.thp - playerA.thp;
+  });
 
-  const orderedPlayers = [...guaranteedPlayers, ...requestedPlayers].sort((a, b) => b.thp - a.thp);
+  const leadershipPlayers = orderedPlayers.filter((player) => isLeadershipRank(player.rank));
+  const corePlayers = orderedPlayers.filter((player) => !isLeadershipRank(player.rank));
 
-  orderedPlayers.forEach((player) => {
-    const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
-    const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
-    const targetTeam = teamAThp <= teamBThp ? 'teamA' : 'teamB';
-    const alternateTeam = targetTeam === 'teamA' ? 'teamB' : 'teamA';
-
-    if (poolState[targetTeam].length < 20 && (poolState[alternateTeam].length >= 20 || Math.abs(teamAThp - teamBThp) <= 100)) {
-      poolState[targetTeam].push(player);
+  leadershipPlayers.forEach((player) => {
+    const targetPool = selectLeadershipTarget(poolState);
+    if (!targetPool) {
+      if (poolState.subs.length < 10) {
+        poolState.subs.push(player);
+      } else {
+        poolState.leftOut.push(player);
+      }
       return;
     }
+    poolState[targetPool].push(player);
+  });
 
-    if (poolState[alternateTeam].length < 20) {
-      poolState[alternateTeam].push(player);
+  corePlayers.forEach((player) => {
+    const targetPool = selectBalancedStarterTarget(poolState);
+    if (!targetPool) {
+      if (poolState.subs.length < 10) {
+        poolState.subs.push(player);
+      } else {
+        poolState.leftOut.push(player);
+      }
       return;
     }
-
-    if (poolState.subs.length < 10) {
-      poolState.subs.push(player);
-      return;
-    }
-
-    poolState.leftOut.push(player);
+    poolState[targetPool].push(player);
   });
 
   const nextAssignments = {};
@@ -380,7 +416,6 @@ function generateTeams() {
     const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
     if (getPoolForPlayer(player, poolState) === 'leftOut') {
       registration.guaranteed = true;
-      registration.requested = registration.requested || true;
       state.desert.registrations[player.id] = registration;
     }
   });
@@ -397,15 +432,58 @@ function getPoolForPlayer(player, poolState) {
   return 'leftOut';
 }
 
-function getIncludedPlayers() {
-  const ids = new Set();
-  Object.entries(state.desert.registrations).forEach(([playerId, registration]) => {
-    if (registration.requested || registration.guaranteed) {
-      ids.add(playerId);
-    }
-  });
+function selectLeadershipTarget(poolState) {
+  const teamAFull = poolState.teamA.length >= 20;
+  const teamBFull = poolState.teamB.length >= 20;
 
-  return state.roster.filter((player) => ids.has(player.id));
+  if (teamAFull && teamBFull) {
+    return null;
+  }
+  if (teamAFull) {
+    return 'teamB';
+  }
+  if (teamBFull) {
+    return 'teamA';
+  }
+
+  const teamALeaders = poolState.teamA.filter((entry) => isLeadershipRank(entry.rank)).length;
+  const teamBLeaders = poolState.teamB.filter((entry) => isLeadershipRank(entry.rank)).length;
+  const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
+  const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
+
+  if (teamALeaders < teamBLeaders) {
+    return 'teamA';
+  }
+  if (teamBLeaders < teamALeaders) {
+    return 'teamB';
+  }
+  return teamAThp <= teamBThp ? 'teamA' : 'teamB';
+}
+
+function selectBalancedStarterTarget(poolState) {
+  const teamAFull = poolState.teamA.length >= 20;
+  const teamBFull = poolState.teamB.length >= 20;
+
+  if (teamAFull && teamBFull) {
+    return null;
+  }
+  if (teamAFull) {
+    return 'teamB';
+  }
+  if (teamBFull) {
+    return 'teamA';
+  }
+
+  const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
+  const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
+  return teamAThp <= teamBThp ? 'teamA' : 'teamB';
+}
+
+function getIncludedPlayers() {
+  return state.roster.filter((player) => {
+    const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
+    return Boolean(registration.requested);
+  });
 }
 
 function toggleLock(playerId) {
@@ -418,6 +496,9 @@ function toggleLock(playerId) {
 
 function movePlayer(playerId) {
   const current = state.teams.assignments[playerId] || { pool: 'leftOut', locked: false };
+  if (current.locked) {
+    return;
+  }
   const nextPool = getNextPool(current.pool || 'leftOut');
   state.teams.assignments[playerId] = { ...current, pool: nextPool };
   saveState();
@@ -440,12 +521,31 @@ function labelForPool(pool) {
   return labels[pool] || 'Left Out';
 }
 
+function normalizeRank(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (['R1', 'R2', 'R3', 'R4', 'R5'].includes(normalized)) {
+    return normalized;
+  }
+  return 'R1';
+}
+
+function isLeadershipRank(rank) {
+  const normalized = normalizeRank(rank);
+  return normalized === 'R4' || normalized === 'R5';
+}
+
+function renderRankBadge(rank) {
+  const normalized = normalizeRank(rank);
+  const className = `rank-badge rank-${normalized.toLowerCase()}`;
+  return `<span class="${className}">${escapeHtml(normalized)}</span>`;
+}
+
 function editPlayer(playerId) {
   const player = state.roster.find((entry) => entry.id === playerId);
   if (!player) return;
   document.getElementById('player-id').value = player.id;
   document.getElementById('player-name').value = player.name;
-  document.getElementById('player-rank').value = player.rank;
+  document.getElementById('player-rank').value = normalizeRank(player.rank);
   document.getElementById('player-thp').value = player.thp;
   document.getElementById('roster-form').classList.remove('hidden');
   document.getElementById('player-name').focus();
