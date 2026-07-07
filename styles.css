@@ -320,6 +320,27 @@ select:focus {
   color: var(--text);
 }
 
+/* Rank badges */
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #111111;
+  font-weight: 700;
+  color: #fff;
+  font-size: 0.88rem;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.6), 0 0 8px rgba(0,0,0,0.25) inset;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.rank-R5 { border-color: #9333EA; }
+.rank-R4 { border-color: #C084FC; }
+.rank-R3 { border-color: #3B82F6; }
+.rank-R2 { border-color: #F97316; }
+.rank-R1 { border-color: #6B7280; color: #fff; }
+
+
 .checkbox-block {
   display: flex;
   flex-direction: column;

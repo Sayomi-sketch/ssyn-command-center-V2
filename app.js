@@ -1,51 +1,12 @@
-const STORAGE_KEY = 'ssyn-command-center-v2-state';
-
-const defaultState = {
+// Firestore-backed state. Real-time listeners will populate this.
+const state = {
   roster: [],
-  desert: {
-    eventDate: '',
-    timeSlot: '18:00',
-    registrations: {}
-  },
-  teams: {
-    assignments: {},
-    generated: false,
-    lastSavedAt: ''
-  }
+  desert: { eventDate: '', timeSlot: '18:00', registrations: {} },
+  teams: { assignments: {}, generated: false, lastSavedAt: '' }
 };
 
-let state = loadState();
-
-function loadState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) {
-      return structuredClone(defaultState);
-    }
-    const parsed = JSON.parse(saved);
-    return {
-      roster: Array.isArray(parsed.roster) ? parsed.roster : [],
-      desert: {
-        eventDate: parsed?.desert?.eventDate || '',
-        timeSlot: parsed?.desert?.timeSlot || '18:00',
-        registrations: parsed?.desert?.registrations || {}
-      },
-      teams: {
-        assignments: parsed?.teams?.assignments || {},
-        generated: Boolean(parsed?.teams?.generated),
-        lastSavedAt: parsed?.teams?.lastSavedAt || ''
-      }
-    };
-  } catch (error) {
-    console.warn('Unable to load state', error);
-    return structuredClone(defaultState);
-  }
-}
-
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  state.teams.lastSavedAt = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // no-op: individual operations write directly to Firestore via window.db
 }
 
 function init() {
@@ -54,6 +15,70 @@ function init() {
   bindDesert();
   bindTeams();
   render();
+  initFirebaseListeners();
+}
+
+function initFirebaseListeners() {
+  if (!window.db) {
+    console.warn('window.db not available; running in offline/local mode.');
+    return;
+  }
+
+  window.db.onRosterSnapshot((snap) => {
+    const list = [];
+    snap.forEach((doc) => {
+      const data = doc.data();
+      list.push({
+        id: doc.id,
+        name: data.name || '',
+        rank: data.rank || 'R1',
+        rankValue: data.rankValue || data.rank || 'R1',
+        rankSort: Number(data.rankSort) || Number(String(data.rank || 'R1').replace(/[^0-9]/g, '')) || 1,
+        thp: Number(data.thp) || 0
+      });
+    });
+    state.roster = list;
+    renderRoster();
+    renderDesert();
+    renderTeams();
+  });
+
+  window.db.onRegistrationsSnapshot((snap) => {
+    const map = {};
+    snap.forEach((doc) => {
+      const data = doc.data();
+      map[doc.id] = { requested: Boolean(data.requested), guaranteed: Boolean(data.guaranteed) };
+    });
+    state.desert.registrations = map;
+    renderDesert();
+    renderTeams();
+  });
+
+  window.db.onDesertMetaSnapshot((doc) => {
+    if (!doc.exists) return;
+    const d = doc.data();
+    state.desert.eventDate = d.eventDate || '';
+    state.desert.timeSlot = d.timeSlot || '18:00';
+    renderDesert();
+  });
+
+  window.db.onTeamsAssignmentsSnapshot((snap) => {
+    const map = {};
+    snap.forEach((doc) => {
+      const data = doc.data();
+      map[doc.id] = { pool: data.pool || 'leftOut', locked: Boolean(data.locked) };
+    });
+    state.teams.assignments = map;
+    renderTeams();
+  });
+
+  window.db.onTeamsMetaSnapshot((doc) => {
+    if (!doc.exists) return;
+    const d = doc.data();
+    state.teams.generated = Boolean(d.generated);
+    state.teams.lastSavedAt = d.lastSavedAt || '';
+    renderTeams();
+  });
 }
 
 function bindNavigation() {
@@ -79,35 +104,36 @@ function bindRoster() {
     form.classList.toggle('hidden');
   });
 
-  cancel.addEventListener('click', () => {
-    resetRosterForm();
-    form.classList.add('hidden');
-  });
+  cancel.addEventListener('click', resetRosterForm);
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
+    const id = document.getElementById('player-id').value || crypto.randomUUID();
     const player = {
-      id: document.getElementById('player-id').value || crypto.randomUUID(),
+      id,
       name: document.getElementById('player-name').value.trim(),
-      rank: normalizeRank(document.getElementById('player-rank').value),
+      rank: document.getElementById('player-rank').value,
+      rankValue: document.getElementById('player-rank').value,
       thp: Number(document.getElementById('player-thp').value)
     };
 
-    if (!player.name || Number.isNaN(player.thp)) {
-      return;
-    }
+    if (!player.name || !player.rank || Number.isNaN(player.thp)) return;
 
-    const existingId = document.getElementById('player-id').value;
-    if (existingId) {
-      state.roster = state.roster.map((entry) => (entry.id === existingId ? player : entry));
+    if (window.db && window.db.upsertPlayer) {
+      window.db.upsertPlayer(player).then(() => {
+        resetRosterForm();
+      }).catch((err) => console.error('Error saving player', err));
     } else {
-      state.roster.push(player);
+      // fallback to local update for offline/editor preview
+      const existingId = document.getElementById('player-id').value;
+      if (existingId) {
+        state.roster = state.roster.map((entry) => (entry.id === existingId ? player : entry));
+      } else {
+        state.roster.push(player);
+      }
+      renderRoster();
+      resetRosterForm();
     }
-
-    saveState();
-    renderRoster();
-    resetRosterForm();
-    form.classList.add('hidden');
   });
 
   search.addEventListener('input', renderRoster);
@@ -115,22 +141,20 @@ function bindRoster() {
 }
 
 function resetRosterForm() {
-  const form = document.getElementById('roster-form');
-  form.reset();
+  document.getElementById('roster-form').reset();
   document.getElementById('player-id').value = '';
-  document.getElementById('player-rank').value = 'R1';
 }
 
 function bindDesert() {
   document.getElementById('event-date').addEventListener('change', (event) => {
     state.desert.eventDate = event.target.value;
-    saveState();
+    if (window.db && window.db.setDesertMeta) window.db.setDesertMeta({ eventDate: state.desert.eventDate });
     renderDesert();
   });
 
   document.getElementById('event-time').addEventListener('change', (event) => {
     state.desert.timeSlot = event.target.value;
-    saveState();
+    if (window.db && window.db.setDesertMeta) window.db.setDesertMeta({ timeSlot: state.desert.timeSlot });
     renderDesert();
   });
 }
@@ -147,7 +171,9 @@ function bindTeams() {
   });
 
   document.getElementById('save-teams').addEventListener('click', () => {
-    saveState();
+    if (window.db && window.db.setTeamsMeta) {
+      window.db.setTeamsMeta({ lastSavedAt: new Date().toISOString() });
+    }
     renderTeams();
   });
 }
@@ -164,17 +190,26 @@ function renderRoster() {
   const sort = document.getElementById('roster-sort').value;
 
   let players = [...state.roster].filter((player) => {
-    return [player.name, player.rank, String(player.thp)].some((value) => String(value).toLowerCase().includes(search));
+    return [player.name, player.rank, String(player.thp)].some((value) => value.toLowerCase().includes(search));
   });
 
   players.sort((a, b) => {
+    const rankValue = (r) => {
+      try {
+        if (r.rankSort) return Number(r.rankSort) || 1;
+        return Number((r.rank || r.rankValue || 'R1').replace(/[^0-9]/g, '')) || 1;
+      } catch (e) { return 1; }
+    };
+
     switch (sort) {
       case 'thp-desc':
         return b.thp - a.thp;
       case 'thp-asc':
         return a.thp - b.thp;
-      case 'rank':
-        return normalizeRank(a.rank).localeCompare(normalizeRank(b.rank));
+      case 'rank-asc':
+        return rankValue(a) - rankValue(b) || a.name.localeCompare(b.name);
+      case 'rank-desc':
+        return rankValue(b) - rankValue(a) || a.name.localeCompare(b.name);
       default:
         return a.name.localeCompare(b.name);
     }
@@ -186,15 +221,15 @@ function renderRoster() {
   }
 
   list.innerHTML = players.map((player) => {
+    // display modern rank badge
+    const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
+    const thpLabel = `THP ${player.thp}`;
     return `
       <article class="player-card">
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats">
-              ${renderRankBadge(player.rank)}
-              <span class="stat-divider">THP ${player.thp}</span>
-            </div>
+            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • ${thpLabel}</div>
           </div>
         </div>
         <div class="row-actions">
@@ -221,12 +256,13 @@ function renderDesert() {
 
   list.innerHTML = state.roster.map((player) => {
     const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
+    const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
     return `
       <article class="registration-row">
         <div class="registration-top">
           <div>
             <div class="registration-name">${escapeHtml(player.name)}</div>
-            <div class="registration-meta">${renderRankBadge(player.rank)} <span class="stat-divider">THP ${player.thp}</span></div>
+            <div class="registration-meta"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${player.thp}</div>
           </div>
         </div>
         <div class="checkbox-block">
@@ -250,7 +286,9 @@ function renderDesert() {
       const current = state.desert.registrations[playerId] || { requested: false, guaranteed: false };
       current[field] = event.target.checked;
       state.desert.registrations[playerId] = current;
-      saveState();
+      if (window.db && window.db.setRegistration) {
+        window.db.setRegistration(playerId, current).catch((err) => console.error('reg save', err));
+      }
       renderDesert();
       renderTeams();
     });
@@ -262,7 +300,6 @@ function renderTeams() {
   const teamBList = document.getElementById('team-b-list');
   const subsList = document.getElementById('subs-list');
   const leftOutList = document.getElementById('left-out-list');
-  const summary = document.getElementById('team-summary');
 
   const assignments = state.teams.assignments || {};
   const includedPlayers = getIncludedPlayers();
@@ -275,36 +312,25 @@ function renderTeams() {
 
   includedPlayers.forEach((player) => {
     const assignment = assignments[player.id] || { pool: 'leftOut', locked: false };
-    const pool = assignment.pool || 'leftOut';
-    if (poolMap[pool] !== undefined) {
-      poolMap[pool].push(player);
+    if (poolMap[assignment.pool] !== undefined) {
+      poolMap[assignment.pool].push(player);
     }
   });
 
-  const teamAThp = poolMap.teamA.reduce((sum, entry) => sum + entry.thp, 0);
-  const teamBThp = poolMap.teamB.reduce((sum, entry) => sum + entry.thp, 0);
-  const thpDifference = Math.abs(teamAThp - teamBThp);
-
-  summary.innerHTML = `
-    <div class="summary-grid">
-      <div class="summary-item">
-        <span class="summary-label">Total THP Team A</span>
-        <span class="summary-value">${teamAThp}</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">Total THP Team B</span>
-        <span class="summary-value">${teamBThp}</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">THP Difference</span>
-        <span class="summary-value">${thpDifference}</span>
-      </div>
-    </div>
-  `;
+  // Update THP summary
+  const teamATHP = poolMap.teamA.reduce((s, p) => s + (p.thp || 0), 0);
+  const teamBTHP = poolMap.teamB.reduce((s, p) => s + (p.thp || 0), 0);
+  const diff = Math.abs(teamATHP - teamBTHP);
+  const aEl = document.getElementById('team-a-thp');
+  const bEl = document.getElementById('team-b-thp');
+  const dEl = document.getElementById('thp-diff');
+  if (aEl) aEl.textContent = String(teamATHP);
+  if (bEl) bEl.textContent = String(teamBTHP);
+  if (dEl) dEl.textContent = String(diff);
 
   if (!includedPlayers.length) {
     [teamAList, teamBList, subsList, leftOutList].forEach((element) => {
-      element.innerHTML = '<div class="list-empty">No eligible players yet. Mark players as Requested to Fight in Desert Storm.</div>';
+      element.innerHTML = '<div class="list-empty">No eligible players yet. Mark players as requested or guaranteed in Desert Storm.</div>';
     });
     return;
   }
@@ -329,7 +355,7 @@ function renderPool(container, players, pool) {
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats">${renderRankBadge(player.rank)} <span class="stat-divider">THP ${player.thp}</span></div>
+            <div class="player-stats"><span class="rank-badge rank-${escapeHtml(player.rank || player.rankValue || 'R1')}">${escapeHtml(player.rank || player.rankValue || 'R1')}</span> • THP ${player.thp}</div>
           </div>
           <div class="chip">${labelForPool(assignment.pool || pool)}</div>
         </div>
@@ -361,43 +387,63 @@ function generateTeams() {
   });
 
   const availablePlayers = eligiblePlayers.filter((player) => !assignments[player.id]?.locked);
-  const orderedPlayers = [...availablePlayers].sort((playerA, playerB) => {
-    const registrationA = state.desert.registrations[playerA.id] || { requested: false, guaranteed: false };
-    const registrationB = state.desert.registrations[playerB.id] || { requested: false, guaranteed: false };
-    const guaranteedDiff = Number(registrationB.guaranteed) - Number(registrationA.guaranteed);
-    if (guaranteedDiff !== 0) {
-      return guaranteedDiff;
+  const guaranteedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.guaranteed);
+  const requestedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.requested && !state.desert.registrations[player.id]?.guaranteed);
+
+  const orderedPlayers = [...guaranteedPlayers, ...requestedPlayers].sort((a, b) => b.thp - a.thp);
+  // First, split R4 and R5 leaders evenly between Team A and Team B.
+  const isLeader = (p) => (p.rank || p.rankValue || '').toString().startsWith('R4') || (p.rank || p.rankValue || '').toString().startsWith('R5');
+  const leaders = orderedPlayers.filter(isLeader);
+  const nonLeaders = orderedPlayers.filter((p) => !isLeader(p));
+
+  // Sort leaders by THP desc so strongest leaders are balanced first
+  leaders.sort((a, b) => b.thp - a.thp);
+
+  leaders.forEach((player) => {
+    const teamACount = poolState.teamA.filter((p) => isLeader(p)).length;
+    const teamBCount = poolState.teamB.filter((p) => isLeader(p)).length;
+    const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
+    const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
+
+    let targetTeam = 'teamA';
+    if (teamACount > teamBCount) targetTeam = 'teamB';
+    else if (teamACount < teamBCount) targetTeam = 'teamA';
+    else targetTeam = teamAThp <= teamBThp ? 'teamA' : 'teamB';
+
+    if (poolState[targetTeam].length < 20) {
+      poolState[targetTeam].push(player);
+    } else if (poolState[ targetTeam === 'teamA' ? 'teamB' : 'teamA' ].length < 20) {
+      poolState[targetTeam === 'teamA' ? 'teamB' : 'teamA'].push(player);
+    } else if (poolState.subs.length < 10) {
+      poolState.subs.push(player);
+    } else {
+      poolState.leftOut.push(player);
     }
-    return playerB.thp - playerA.thp;
   });
 
-  const leadershipPlayers = orderedPlayers.filter((player) => isLeadershipRank(player.rank));
-  const corePlayers = orderedPlayers.filter((player) => !isLeadershipRank(player.rank));
+  // Then assign remaining players (non-leaders) by THP balance
+  nonLeaders.forEach((player) => {
+    const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
+    const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
+    const targetTeam = teamAThp <= teamBThp ? 'teamA' : 'teamB';
+    const alternateTeam = targetTeam === 'teamA' ? 'teamB' : 'teamA';
 
-  leadershipPlayers.forEach((player) => {
-    const targetPool = selectLeadershipTarget(poolState);
-    if (!targetPool) {
-      if (poolState.subs.length < 10) {
-        poolState.subs.push(player);
-      } else {
-        poolState.leftOut.push(player);
-      }
+    if (poolState[targetTeam].length < 20 && (poolState[alternateTeam].length >= 20 || Math.abs(teamAThp - teamBThp) <= 100)) {
+      poolState[targetTeam].push(player);
       return;
     }
-    poolState[targetPool].push(player);
-  });
 
-  corePlayers.forEach((player) => {
-    const targetPool = selectBalancedStarterTarget(poolState);
-    if (!targetPool) {
-      if (poolState.subs.length < 10) {
-        poolState.subs.push(player);
-      } else {
-        poolState.leftOut.push(player);
-      }
+    if (poolState[alternateTeam].length < 20) {
+      poolState[alternateTeam].push(player);
       return;
     }
-    poolState[targetPool].push(player);
+
+    if (poolState.subs.length < 10) {
+      poolState.subs.push(player);
+      return;
+    }
+
+    poolState.leftOut.push(player);
   });
 
   const nextAssignments = {};
@@ -416,13 +462,26 @@ function generateTeams() {
     const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
     if (getPoolForPlayer(player, poolState) === 'leftOut') {
       registration.guaranteed = true;
+      registration.requested = registration.requested || true;
       state.desert.registrations[player.id] = registration;
     }
   });
 
+  // Persist assignments and updated registrations to Firestore
   state.teams.assignments = nextAssignments;
   state.teams.generated = true;
-  saveState();
+
+  if (window.db && window.db.batchAssignments) {
+    const meta = { generated: true, lastSavedAt: new Date().toISOString() };
+    window.db.batchAssignments(nextAssignments, meta).catch((err) => console.error('batch assign', err));
+  }
+
+  // update registrations for left-out players
+  Object.entries(state.desert.registrations).forEach(([playerId, reg]) => {
+    if (reg.guaranteed) {
+      if (window.db && window.db.setRegistration) window.db.setRegistration(playerId, reg).catch((err) => console.error(err));
+    }
+  });
 }
 
 function getPoolForPlayer(player, poolState) {
@@ -432,76 +491,35 @@ function getPoolForPlayer(player, poolState) {
   return 'leftOut';
 }
 
-function selectLeadershipTarget(poolState) {
-  const teamAFull = poolState.teamA.length >= 20;
-  const teamBFull = poolState.teamB.length >= 20;
-
-  if (teamAFull && teamBFull) {
-    return null;
-  }
-  if (teamAFull) {
-    return 'teamB';
-  }
-  if (teamBFull) {
-    return 'teamA';
-  }
-
-  const teamALeaders = poolState.teamA.filter((entry) => isLeadershipRank(entry.rank)).length;
-  const teamBLeaders = poolState.teamB.filter((entry) => isLeadershipRank(entry.rank)).length;
-  const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
-  const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
-
-  if (teamALeaders < teamBLeaders) {
-    return 'teamA';
-  }
-  if (teamBLeaders < teamALeaders) {
-    return 'teamB';
-  }
-  return teamAThp <= teamBThp ? 'teamA' : 'teamB';
-}
-
-function selectBalancedStarterTarget(poolState) {
-  const teamAFull = poolState.teamA.length >= 20;
-  const teamBFull = poolState.teamB.length >= 20;
-
-  if (teamAFull && teamBFull) {
-    return null;
-  }
-  if (teamAFull) {
-    return 'teamB';
-  }
-  if (teamBFull) {
-    return 'teamA';
-  }
-
-  const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
-  const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
-  return teamAThp <= teamBThp ? 'teamA' : 'teamB';
-}
-
 function getIncludedPlayers() {
-  return state.roster.filter((player) => {
-    const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
-    return Boolean(registration.requested);
+  const ids = new Set();
+  Object.entries(state.desert.registrations).forEach(([playerId, registration]) => {
+    if (registration.requested || registration.guaranteed) {
+      ids.add(playerId);
+    }
   });
+
+  return state.roster.filter((player) => ids.has(player.id));
 }
 
 function toggleLock(playerId) {
   const existing = state.teams.assignments[playerId] || { pool: 'leftOut', locked: false };
-  existing.locked = !existing.locked;
-  state.teams.assignments[playerId] = existing;
-  saveState();
+  const updated = { ...existing, locked: !existing.locked };
+  state.teams.assignments[playerId] = updated;
+  if (window.db && window.db.setTeamAssignment) {
+    window.db.setTeamAssignment(playerId, updated).catch((err) => console.error('lock save', err));
+  }
   renderTeams();
 }
 
 function movePlayer(playerId) {
   const current = state.teams.assignments[playerId] || { pool: 'leftOut', locked: false };
-  if (current.locked) {
-    return;
-  }
   const nextPool = getNextPool(current.pool || 'leftOut');
-  state.teams.assignments[playerId] = { ...current, pool: nextPool };
-  saveState();
+  const updated = { ...current, pool: nextPool };
+  state.teams.assignments[playerId] = updated;
+  if (window.db && window.db.setTeamAssignment) {
+    window.db.setTeamAssignment(playerId, updated).catch((err) => console.error('move save', err));
+  }
   renderTeams();
 }
 
@@ -521,42 +539,26 @@ function labelForPool(pool) {
   return labels[pool] || 'Left Out';
 }
 
-function normalizeRank(value) {
-  const normalized = String(value || '').trim().toUpperCase();
-  if (['R1', 'R2', 'R3', 'R4', 'R5'].includes(normalized)) {
-    return normalized;
-  }
-  return 'R1';
-}
-
-function isLeadershipRank(rank) {
-  const normalized = normalizeRank(rank);
-  return normalized === 'R4' || normalized === 'R5';
-}
-
-function renderRankBadge(rank) {
-  const normalized = normalizeRank(rank);
-  const className = `rank-badge rank-${normalized.toLowerCase()}`;
-  return `<span class="${className}">${escapeHtml(normalized)}</span>`;
-}
-
 function editPlayer(playerId) {
   const player = state.roster.find((entry) => entry.id === playerId);
   if (!player) return;
   document.getElementById('player-id').value = player.id;
   document.getElementById('player-name').value = player.name;
-  document.getElementById('player-rank').value = normalizeRank(player.rank);
+  document.getElementById('player-rank').value = player.rank;
   document.getElementById('player-thp').value = player.thp;
   document.getElementById('roster-form').classList.remove('hidden');
   document.getElementById('player-name').focus();
 }
 
 function deletePlayer(playerId) {
-  state.roster = state.roster.filter((player) => player.id !== playerId);
-  delete state.desert.registrations[playerId];
-  delete state.teams.assignments[playerId];
-  saveState();
-  render();
+  if (window.db && window.db.deletePlayer) {
+    window.db.deletePlayer(playerId).catch((err) => console.error('delete player', err));
+  } else {
+    state.roster = state.roster.filter((player) => player.id !== playerId);
+    delete state.desert.registrations[playerId];
+    delete state.teams.assignments[playerId];
+    render();
+  }
 }
 
 function escapeHtml(value) {

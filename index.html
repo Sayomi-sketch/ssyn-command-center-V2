@@ -46,11 +46,11 @@
               <label>
                 Rank
                 <select id="player-rank" required>
-                  <option value="R5">R5</option>
-                  <option value="R4">R4</option>
-                  <option value="R3">R3</option>
-                  <option value="R2">R2</option>
-                  <option value="R1">R1</option>
+                  <option value="R1">R1 — New Member</option>
+                  <option value="R2">R2 — Lower Rank</option>
+                  <option value="R3">R3 — Member</option>
+                  <option value="R4">R4 — Officer</option>
+                  <option value="R5">R5 — Alliance Leader</option>
                 </select>
               </label>
             </div>
@@ -72,7 +72,8 @@
               <option value="name">Sort by Name</option>
               <option value="thp-desc">Sort by THP ↓</option>
               <option value="thp-asc">Sort by THP ↑</option>
-              <option value="rank">Sort by Rank</option>
+              <option value="rank-asc">Sort by Rank ↑</option>
+              <option value="rank-desc">Sort by Rank ↓</option>
             </select>
           </div>
 
@@ -127,10 +128,13 @@
           </div>
 
           <div class="glass-card info-card">
-            <p>Only players marked Requested to Fight are eligible. Guaranteed players are placed into the starter lineup first, and left out players become guaranteed next round.</p>
+            <p>Only requested players are eligible. Guaranteed players are always included, and left out players become guaranteed next round.</p>
+            <div class="team-stats" style="margin-top:10px; display:flex; gap:12px; flex-wrap:wrap;">
+              <div class="team-stat">Team A THP: <strong id="team-a-thp">0</strong></div>
+              <div class="team-stat">Team B THP: <strong id="team-b-thp">0</strong></div>
+              <div class="team-stat">THP Difference: <strong id="thp-diff">0</strong></div>
+            </div>
           </div>
-
-          <div id="team-summary" class="glass-card"></div>
 
           <div class="team-grid">
             <div class="glass-card team-column">
@@ -157,6 +161,13 @@
         </section>
       </main>
     </div>
+
+    <!-- Firebase project configuration -->
+    <script src="firebase-config.js"></script>
+    <!-- Firebase SDK + init that exposes a lightweight `db` helper on window -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-init.js"></script>
 
     <script src="app.js"></script>
   </body>
