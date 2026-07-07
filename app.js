@@ -298,28 +298,38 @@ function renderDesert() {
 function renderTeams() {
   const teamAList = document.getElementById('team-a-list');
   const teamBList = document.getElementById('team-b-list');
-  const subsList = document.getElementById('subs-list');
   const leftOutList = document.getElementById('left-out-list');
 
   const assignments = state.teams.assignments || {};
   const includedPlayers = getIncludedPlayers();
   const poolMap = {
-    teamA: [],
-    teamB: [],
-    subs: [],
+    teamAStarter: [],
+    teamASub: [],
+    teamBStarter: [],
+    teamBSub: [],
     leftOut: []
   };
+  const legacySubs = [];
 
   includedPlayers.forEach((player) => {
-    const assignment = assignments[player.id] || { pool: 'leftOut', locked: false };
-    if (poolMap[assignment.pool] !== undefined) {
-      poolMap[assignment.pool].push(player);
+    const pool = normalizePool(assignments[player.id]?.pool);
+    if (pool === 'subs') {
+      legacySubs.push(player);
+      return;
+    }
+    if (poolMap[pool] !== undefined) {
+      poolMap[pool].push(player);
     }
   });
 
+  legacySubs.forEach((player) => {
+    const targetPool = pickBalancedPool(player, poolMap, ['teamASub', 'teamBSub']);
+    poolMap[targetPool || 'leftOut'].push(player);
+  });
+
   // Update THP summary
-  const teamATHP = poolMap.teamA.reduce((s, p) => s + (p.thp || 0), 0);
-  const teamBTHP = poolMap.teamB.reduce((s, p) => s + (p.thp || 0), 0);
+  const teamATHP = sumPlayers(poolMap.teamAStarter) + sumPlayers(poolMap.teamASub);
+  const teamBTHP = sumPlayers(poolMap.teamBStarter) + sumPlayers(poolMap.teamBSub);
   const diff = Math.abs(teamATHP - teamBTHP);
   const aEl = document.getElementById('team-a-thp');
   const bEl = document.getElementById('team-b-thp');
@@ -329,16 +339,30 @@ function renderTeams() {
   if (dEl) dEl.textContent = String(diff);
 
   if (!includedPlayers.length) {
-    [teamAList, teamBList, subsList, leftOutList].forEach((element) => {
+    [teamAList, teamBList, leftOutList].forEach((element) => {
       element.innerHTML = '<div class="list-empty">No eligible players yet. Mark players as requested or guaranteed in Desert Storm.</div>';
     });
     return;
   }
 
-  renderPool(teamAList, poolMap.teamA, 'teamA');
-  renderPool(teamBList, poolMap.teamB, 'teamB');
-  renderPool(subsList, poolMap.subs, 'subs');
+  renderTeamGroup(teamAList, poolMap.teamAStarter, poolMap.teamASub, 'teamA');
+  renderTeamGroup(teamBList, poolMap.teamBStarter, poolMap.teamBSub, 'teamB');
   renderPool(leftOutList, poolMap.leftOut, 'leftOut');
+}
+
+function renderTeamGroup(container, starters, subs, teamKey) {
+  const starterCards = renderPoolCards(starters, `${teamKey}Starter`);
+  const subCards = renderPoolCards(subs, `${teamKey}Sub`);
+  container.innerHTML = `
+    <section class="team-group-section">
+      <div class="team-meta">Starters (${starters.length}/20)</div>
+      ${starterCards || '<div class="list-empty">No starters assigned.</div>'}
+    </section>
+    <section class="team-group-section">
+      <div class="team-meta">Subs (${subs.length}/10)</div>
+      ${subCards || '<div class="list-empty">No substitutes assigned.</div>'}
+    </section>
+  `;
 }
 
 function renderPool(container, players, pool) {
@@ -347,7 +371,13 @@ function renderPool(container, players, pool) {
     return;
   }
 
-  container.innerHTML = players.map((player) => {
+  container.innerHTML = renderPoolCards(players, pool);
+}
+
+function renderPoolCards(players, pool) {
+  if (!players.length) return '';
+
+  return players.map((player) => {
     const assignment = state.teams.assignments[player.id] || { pool, locked: false };
     const lockLabel = assignment.locked ? '🔒 Locked' : '🔓 Unlock';
     return `
@@ -372,82 +402,80 @@ function generateTeams() {
   const eligiblePlayers = getIncludedPlayers();
   const assignments = { ...state.teams.assignments };
   const poolState = {
-    teamA: [],
-    teamB: [],
-    subs: [],
+    teamAStarter: [],
+    teamASub: [],
+    teamBStarter: [],
+    teamBSub: [],
     leftOut: []
   };
+  const floatingLockedSubs = [];
 
   eligiblePlayers.forEach((player) => {
     const existing = assignments[player.id];
     if (existing?.locked) {
-      const targetPool = ['teamA', 'teamB', 'subs', 'leftOut'].includes(existing.pool) ? existing.pool : 'leftOut';
+      const targetPool = normalizePool(existing.pool);
+      if (targetPool === 'subs') {
+        floatingLockedSubs.push(player);
+        return;
+      }
       poolState[targetPool].push(player);
     }
   });
 
-  const availablePlayers = eligiblePlayers.filter((player) => !assignments[player.id]?.locked);
-  const guaranteedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.guaranteed);
-  const requestedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.requested && !state.desert.registrations[player.id]?.guaranteed);
-
-  const orderedPlayers = [...guaranteedPlayers, ...requestedPlayers].sort((a, b) => b.thp - a.thp);
-  // First, split R4 and R5 leaders evenly between Team A and Team B.
-  const isLeader = (p) => (p.rank || p.rankValue || '').toString().startsWith('R4') || (p.rank || p.rankValue || '').toString().startsWith('R5');
-  const leaders = orderedPlayers.filter(isLeader);
-  const nonLeaders = orderedPlayers.filter((p) => !isLeader(p));
-
-  // Sort leaders by THP desc so strongest leaders are balanced first
-  leaders.sort((a, b) => b.thp - a.thp);
-
-  leaders.forEach((player) => {
-    const teamACount = poolState.teamA.filter((p) => isLeader(p)).length;
-    const teamBCount = poolState.teamB.filter((p) => isLeader(p)).length;
-    const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
-    const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
-
-    let targetTeam = 'teamA';
-    if (teamACount > teamBCount) targetTeam = 'teamB';
-    else if (teamACount < teamBCount) targetTeam = 'teamA';
-    else targetTeam = teamAThp <= teamBThp ? 'teamA' : 'teamB';
-
-    if (poolState[targetTeam].length < 20) {
-      poolState[targetTeam].push(player);
-    } else if (poolState[ targetTeam === 'teamA' ? 'teamB' : 'teamA' ].length < 20) {
-      poolState[targetTeam === 'teamA' ? 'teamB' : 'teamA'].push(player);
-    } else if (poolState.subs.length < 10) {
-      poolState.subs.push(player);
-    } else {
-      poolState.leftOut.push(player);
-    }
+  floatingLockedSubs.forEach((player) => {
+    const targetPool = pickBalancedPool(player, poolState, ['teamASub', 'teamBSub']);
+    poolState[targetPool || 'leftOut'].push(player);
   });
 
-  // Then assign remaining players (non-leaders) by THP balance
-  nonLeaders.forEach((player) => {
-    const teamAThp = poolState.teamA.reduce((sum, entry) => sum + entry.thp, 0);
-    const teamBThp = poolState.teamB.reduce((sum, entry) => sum + entry.thp, 0);
-    const targetTeam = teamAThp <= teamBThp ? 'teamA' : 'teamB';
-    const alternateTeam = targetTeam === 'teamA' ? 'teamB' : 'teamA';
+  const availablePlayers = eligiblePlayers.filter((player) => !assignments[player.id]?.locked);
+  const guaranteedPlayers = availablePlayers.filter((player) => state.desert.registrations[player.id]?.guaranteed);
+  const leaderPlayers = availablePlayers.filter((player) => !state.desert.registrations[player.id]?.guaranteed && isLeader(player));
+  const otherPlayers = availablePlayers.filter((player) => !state.desert.registrations[player.id]?.guaranteed && !isLeader(player));
 
-    if (poolState[targetTeam].length < 20 && (poolState[alternateTeam].length >= 20 || Math.abs(teamAThp - teamBThp) <= 100)) {
-      poolState[targetTeam].push(player);
-      return;
-    }
+  const guaranteedStarterResult = assignBalancedGroup(guaranteedPlayers, poolState, ['teamAStarter', 'teamBStarter'], getOpenSlots(poolState, ['teamAStarter', 'teamBStarter'], 20), true);
+  placePlayers(poolState, guaranteedStarterResult.assignments);
 
-    if (poolState[alternateTeam].length < 20) {
-      poolState[alternateTeam].push(player);
-      return;
-    }
+  const leaderStarterResult = assignBalancedGroup(leaderPlayers, poolState, ['teamAStarter', 'teamBStarter'], getOpenSlots(poolState, ['teamAStarter', 'teamBStarter'], 20), true);
+  placePlayers(poolState, leaderStarterResult.assignments);
 
-    if (poolState.subs.length < 10) {
-      poolState.subs.push(player);
-      return;
-    }
+  const starterFillResult = assignBalancedGroup(otherPlayers, poolState, ['teamAStarter', 'teamBStarter'], getOpenSlots(poolState, ['teamAStarter', 'teamBStarter'], 20), false);
+  placePlayers(poolState, starterFillResult.assignments);
 
+  const subPriorityPlayers = [
+    ...guaranteedStarterResult.unassigned,
+    ...leaderStarterResult.unassigned,
+    ...starterFillResult.unassigned
+  ];
+
+  const guaranteedSubPlayers = subPriorityPlayers.filter((player) => state.desert.registrations[player.id]?.guaranteed);
+  const leaderSubPlayers = subPriorityPlayers.filter((player) => !state.desert.registrations[player.id]?.guaranteed && isLeader(player));
+  const otherSubPlayers = subPriorityPlayers.filter((player) => !state.desert.registrations[player.id]?.guaranteed && !isLeader(player));
+
+  const guaranteedSubResult = assignBalancedGroup(guaranteedSubPlayers, poolState, ['teamASub', 'teamBSub'], getOpenSlots(poolState, ['teamASub', 'teamBSub'], 10), true);
+  placePlayers(poolState, guaranteedSubResult.assignments);
+
+  const leaderSubResult = assignBalancedGroup(leaderSubPlayers, poolState, ['teamASub', 'teamBSub'], getOpenSlots(poolState, ['teamASub', 'teamBSub'], 10), true);
+  placePlayers(poolState, leaderSubResult.assignments);
+
+  const subFillResult = assignBalancedGroup(otherSubPlayers, poolState, ['teamASub', 'teamBSub'], getOpenSlots(poolState, ['teamASub', 'teamBSub'], 10), false);
+  placePlayers(poolState, subFillResult.assignments);
+
+  [
+    ...guaranteedSubResult.unassigned,
+    ...leaderSubResult.unassigned,
+    ...subFillResult.unassigned
+  ].forEach((player) => {
     poolState.leftOut.push(player);
   });
 
   const nextAssignments = {};
-  const allPoolPlayers = [...poolState.teamA, ...poolState.teamB, ...poolState.subs, ...poolState.leftOut];
+  const allPoolPlayers = [
+    ...poolState.teamAStarter,
+    ...poolState.teamASub,
+    ...poolState.teamBStarter,
+    ...poolState.teamBSub,
+    ...poolState.leftOut
+  ];
 
   allPoolPlayers.forEach((player) => {
     const previousEntry = assignments[player.id];
@@ -462,7 +490,6 @@ function generateTeams() {
     const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
     if (getPoolForPlayer(player, poolState) === 'leftOut') {
       registration.guaranteed = true;
-      registration.requested = registration.requested || true;
       state.desert.registrations[player.id] = registration;
     }
   });
@@ -485,16 +512,17 @@ function generateTeams() {
 }
 
 function getPoolForPlayer(player, poolState) {
-  if (poolState.teamA.some((entry) => entry.id === player.id)) return 'teamA';
-  if (poolState.teamB.some((entry) => entry.id === player.id)) return 'teamB';
-  if (poolState.subs.some((entry) => entry.id === player.id)) return 'subs';
+  if (poolState.teamAStarter.some((entry) => entry.id === player.id)) return 'teamAStarter';
+  if (poolState.teamASub.some((entry) => entry.id === player.id)) return 'teamASub';
+  if (poolState.teamBStarter.some((entry) => entry.id === player.id)) return 'teamBStarter';
+  if (poolState.teamBSub.some((entry) => entry.id === player.id)) return 'teamBSub';
   return 'leftOut';
 }
 
 function getIncludedPlayers() {
   const ids = new Set();
   Object.entries(state.desert.registrations).forEach(([playerId, registration]) => {
-    if (registration.requested || registration.guaranteed) {
+    if (registration.requested) {
       ids.add(playerId);
     }
   });
@@ -524,19 +552,160 @@ function movePlayer(playerId) {
 }
 
 function getNextPool(currentPool) {
-  const order = ['teamA', 'teamB', 'subs', 'leftOut'];
-  const index = order.indexOf(currentPool);
+  const order = ['teamAStarter', 'teamBStarter', 'teamASub', 'teamBSub', 'leftOut'];
+  const normalizedPool = normalizePool(currentPool);
+  const index = order.indexOf(normalizedPool === 'subs' ? 'teamASub' : normalizedPool);
   return order[(index + 1) % order.length];
 }
 
 function labelForPool(pool) {
   const labels = {
-    teamA: 'Team A',
-    teamB: 'Team B',
-    subs: 'Subs',
+    teamAStarter: 'Team A Starter',
+    teamASub: 'Team A Sub',
+    teamBStarter: 'Team B Starter',
+    teamBSub: 'Team B Sub',
     leftOut: 'Left Out'
   };
-  return labels[pool] || 'Left Out';
+  return labels[normalizePool(pool)] || 'Left Out';
+}
+
+function normalizePool(pool) {
+  const normalizedPools = {
+    teamA: 'teamAStarter',
+    teamAStarter: 'teamAStarter',
+    teamASub: 'teamASub',
+    teamB: 'teamBStarter',
+    teamBStarter: 'teamBStarter',
+    teamBSub: 'teamBSub',
+    subs: 'subs',
+    leftOut: 'leftOut'
+  };
+  return normalizedPools[pool] || 'leftOut';
+}
+
+function isLeader(player) {
+  return (player.rank || player.rankValue || '').toString().startsWith('R4') || (player.rank || player.rankValue || '').toString().startsWith('R5');
+}
+
+function sumPlayers(players) {
+  return players.reduce((sum, player) => sum + (Number(player.thp) || 0), 0);
+}
+
+function getOpenSlots(poolState, pools, capacityPerPool) {
+  const slotMap = {};
+  pools.forEach((pool) => {
+    slotMap[pool] = Math.max(0, capacityPerPool - poolState[pool].length);
+  });
+  return slotMap;
+}
+
+function placePlayers(poolState, assignments) {
+  assignments.forEach(({ player, pool }) => {
+    poolState[pool].push(player);
+  });
+}
+
+function pickBalancedPool(player, poolState, pools) {
+  const viablePools = pools.filter((pool) => {
+    if (pool === 'teamASub') return poolState.teamASub.length < 10;
+    if (pool === 'teamBSub') return poolState.teamBSub.length < 10;
+    return true;
+  });
+  if (!viablePools.length) return null;
+
+  let bestPool = viablePools[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  viablePools.forEach((pool) => {
+    const teamA = sumPlayers(poolState.teamAStarter) + sumPlayers(poolState.teamASub) + (pool.startsWith('teamA') ? Number(player.thp) || 0 : 0);
+    const teamB = sumPlayers(poolState.teamBStarter) + sumPlayers(poolState.teamBSub) + (pool.startsWith('teamB') ? Number(player.thp) || 0 : 0);
+    const score = Math.abs(teamA - teamB);
+    if (score < bestScore) {
+      bestScore = score;
+      bestPool = pool;
+    }
+  });
+
+  return bestPool;
+}
+
+function assignBalancedGroup(players, poolState, pools, slotsByPool, mustPlace) {
+  const sortedPlayers = [...players].sort((a, b) => (Number(b.thp) || 0) - (Number(a.thp) || 0));
+  const totalSlots = pools.reduce((sum, pool) => sum + (slotsByPool[pool] || 0), 0);
+  const requiredCount = mustPlace ? Math.min(sortedPlayers.length, totalSlots) : totalSlots;
+
+  if (!sortedPlayers.length || requiredCount <= 0) {
+    return { assignments: [], unassigned: sortedPlayers };
+  }
+
+  const initialState = {
+    assignments: [],
+    skipped: [],
+    counts: Object.fromEntries(pools.map((pool) => [pool, 0])),
+    thpA: sumPlayers(poolState.teamAStarter) + sumPlayers(poolState.teamASub),
+    thpB: sumPlayers(poolState.teamBStarter) + sumPlayers(poolState.teamBSub)
+  };
+
+  let beam = [initialState];
+  const beamWidth = 96;
+
+  sortedPlayers.forEach((player, index) => {
+    const remaining = sortedPlayers.length - index - 1;
+    const nextStates = [];
+
+    beam.forEach((state) => {
+      const placedCount = state.assignments.length;
+
+      pools.forEach((pool) => {
+        if (state.counts[pool] >= (slotsByPool[pool] || 0)) return;
+        const nextCounts = { ...state.counts, [pool]: state.counts[pool] + 1 };
+        nextStates.push({
+          assignments: [...state.assignments, { player, pool }],
+          skipped: state.skipped,
+          counts: nextCounts,
+          thpA: state.thpA + (pool.startsWith('teamA') ? Number(player.thp) || 0 : 0),
+          thpB: state.thpB + (pool.startsWith('teamB') ? Number(player.thp) || 0 : 0)
+        });
+      });
+
+      if (!mustPlace || placedCount + remaining >= requiredCount) {
+        nextStates.push({
+          assignments: state.assignments,
+          skipped: [...state.skipped, player],
+          counts: state.counts,
+          thpA: state.thpA,
+          thpB: state.thpB
+        });
+      }
+    });
+
+    beam = nextStates
+      .filter((state) => state.assignments.length <= requiredCount && state.assignments.length + remaining >= requiredCount)
+      .sort((left, right) => scoreBeamState(left, requiredCount) - scoreBeamState(right, requiredCount))
+      .slice(0, beamWidth);
+  });
+
+  const bestState = beam
+    .filter((state) => state.assignments.length === requiredCount)
+    .sort((left, right) => scoreBeamState(left, requiredCount) - scoreBeamState(right, requiredCount))[0];
+
+  if (!bestState) {
+    return { assignments: [], unassigned: sortedPlayers };
+  }
+
+  return {
+    assignments: bestState.assignments,
+    unassigned: bestState.skipped
+  };
+}
+
+function scoreBeamState(state, requiredCount) {
+  const diff = Math.abs(state.thpA - state.thpB);
+  const remainingPenalty = (requiredCount - state.assignments.length) * 1000000;
+  const teamACount = (state.counts.teamAStarter || 0) + (state.counts.teamASub || 0);
+  const teamBCount = (state.counts.teamBStarter || 0) + (state.counts.teamBSub || 0);
+  const countPenalty = Math.abs(teamACount - teamBCount);
+  return diff + remainingPenalty + countPenalty;
 }
 
 function editPlayer(playerId) {

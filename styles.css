@@ -108,6 +108,12 @@ button {
   color: var(--muted);
 }
 
+.team-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.2em;
