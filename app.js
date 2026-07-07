@@ -60,6 +60,8 @@ const state = {
   }
 };
 
+let archiveModalEventsBound = false;
+
 function init() {
   bindNavigation();
   bindRoster();
@@ -360,17 +362,44 @@ function bindArchived() {
 }
 
 function bindArchiveModal() {
-  document.getElementById('cancel-archive-match').addEventListener('click', closeArchiveMatchModal);
-  document.getElementById('create-new-player').addEventListener('click', () => {
+  if (archiveModalEventsBound) return;
+
+  const modal = document.getElementById('archive-match-modal');
+  const cancelButton = document.getElementById('cancel-archive-match');
+  const createButton = document.getElementById('create-new-player');
+  const restoreButton = document.getElementById('restore-archived-player');
+
+  if (!modal || !cancelButton || !createButton || !restoreButton) {
+    console.error('Archive modal elements are missing. Check modal IDs in index.html.');
+    return;
+  }
+
+  cancelButton.addEventListener('click', closeArchiveMatchModal);
+
+  createButton.addEventListener('click', () => {
     const draft = state.ui.pendingPlayerDraft;
     closeArchiveMatchModal();
     if (draft) saveRosterPlayer(draft);
   });
-  document.getElementById('restore-archived-player').addEventListener('click', () => {
+
+  restoreButton.addEventListener('click', () => {
     const archivedId = state.ui.pendingArchivedMatchId;
     closeArchiveMatchModal();
     if (archivedId) restoreArchivedPlayer(archivedId);
   });
+
+  // Click outside the modal card closes the dialog.
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeArchiveMatchModal();
+  });
+
+  // Escape key closes the dialog when it is open.
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (!modal.classList.contains('hidden')) closeArchiveMatchModal();
+  });
+
+  archiveModalEventsBound = true;
 }
 
 function openView(targetId) {
@@ -1925,14 +1954,22 @@ function syncWarzoneDraftPlayers() {
 }
 
 function openArchiveMatchModal(player) {
-  document.getElementById('archive-match-message').textContent = `This player already exists. Would you like to restore ${player.name} instead?`;
-  document.getElementById('archive-match-modal').classList.remove('hidden');
+  const modal = document.getElementById('archive-match-modal');
+  const message = document.getElementById('archive-match-message');
+  if (!modal || !message) return;
+
+  message.textContent = `This player already exists. Would you like to restore ${player.name} instead?`;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
 }
 
 function closeArchiveMatchModal() {
+  const modal = document.getElementById('archive-match-modal');
   state.ui.pendingArchivedMatchId = '';
   state.ui.pendingPlayerDraft = null;
-  document.getElementById('archive-match-modal').classList.add('hidden');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
 }
 
 function upsertWarzoneLocally(eventId, payload) {
@@ -2003,5 +2040,11 @@ window.toggleLock = toggleLock;
 window.movePlayer = movePlayer;
 window.restoreArchivedPlayer = restoreArchivedPlayer;
 window.deleteArchivedPlayerPermanently = deleteArchivedPlayerPermanently;
+window.openArchiveMatchModal = openArchiveMatchModal;
+window.closeArchiveMatchModal = closeArchiveMatchModal;
 
-init();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}
