@@ -26,6 +26,8 @@
         <button class="tab-button" data-target="teams-view">Team Builder</button>
         <button class="tab-button" data-target="warzone-view">Warzone</button>
         <button class="tab-button" data-target="attendance-view">Attendance</button>
+        <button class="tab-button" data-target="participation-view">Participation</button>
+        <button class="tab-button" data-target="history-view">History</button>
       </nav>
 
       <main class="content">
@@ -134,6 +136,12 @@
 
           <div class="glass-card info-card">
             <p>Only players marked Requested to Fight are eligible. Guaranteed Next Round players are prioritized into starter slots first, and left out players are automatically guaranteed next round.</p>
+            <div class="checkbox-block compact-toggle" style="margin-top:10px;">
+              <label>
+                <span>Use Participation Score as Tie Breaker</span>
+                <input id="use-participation-tiebreak" type="checkbox" />
+              </label>
+            </div>
             <div class="team-stats" style="margin-top:10px; display:flex; gap:12px; flex-wrap:wrap;">
               <div class="team-stat">Team A THP: <strong id="team-a-thp">0</strong></div>
               <div class="team-stat">Team B THP: <strong id="team-b-thp">0</strong></div>
@@ -229,6 +237,60 @@
           </div>
 
           <div id="attendance-list" class="stack"></div>
+        </section>
+
+        <section id="participation-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Desert Storm Only</p>
+              <h2>Participation</h2>
+            </div>
+          </div>
+
+          <div id="participation-list" class="stack"></div>
+        </section>
+
+        <section id="history-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Permanent record book</p>
+              <h2>History</h2>
+            </div>
+          </div>
+
+          <div class="history-grid">
+            <div class="glass-card">
+              <div class="list-header">
+                <h3>🌪 Desert Storm History</h3>
+                <p>Every completed event remains editable forever.</p>
+              </div>
+              <div id="history-desert-list" class="stack"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="list-header">
+                <h3>⚔ Warzone History</h3>
+                <p>Select an event to review or edit participation.</p>
+              </div>
+              <div id="history-warzone-list" class="stack"></div>
+            </div>
+          </div>
+
+          <div class="glass-card" id="history-desert-detail-card">
+            <div class="list-header">
+              <h3>Desert Storm Event</h3>
+              <p id="history-desert-meta">Select a Desert Storm event to view full details.</p>
+            </div>
+            <div id="history-desert-detail" class="stack"></div>
+          </div>
+
+          <div class="glass-card" id="history-warzone-detail-card">
+            <div class="list-header">
+              <h3>Warzone Event</h3>
+              <p id="history-warzone-meta">Select a Warzone event to view full details.</p>
+            </div>
+            <div id="history-warzone-detail" class="stack"></div>
+          </div>
         </section>
 
         <section id="archived-view" class="view">

@@ -35,6 +35,8 @@
       onTeamsMetaSnapshot: (cb) => firestore.doc('teams/meta').onSnapshot(cb),
       onTeamsAssignmentsSnapshot: (cb) => firestore.collection('teams_assignments').onSnapshot(cb),
       onWarzonesSnapshot: (cb) => firestore.collection('warzone_events').orderBy('eventDate', 'desc').onSnapshot(cb),
+      onDesertHistorySnapshot: (cb) => firestore.collection('desert_history').orderBy('eventDate', 'desc').onSnapshot(cb),
+      onParticipationStatsSnapshot: (cb) => firestore.collection('participation_stats').onSnapshot(cb),
 
       upsertPlayer: (player) => firestore.collection('roster').doc(player.id).set({
         name: player.name,
@@ -89,11 +91,14 @@
       permanentlyDeleteArchivedPlayer: async (playerId) => {
         const archivedRef = firestore.collection('archived_players').doc(playerId);
         const attendanceRef = firestore.collection('attendance_stats').doc(playerId);
+        const participationRef = firestore.collection('participation_stats').doc(playerId);
         const warzoneSnap = await firestore.collection('warzone_events').get();
+        const desertSnap = await firestore.collection('desert_history').get();
         const batch = firestore.batch();
 
         batch.delete(archivedRef);
         batch.delete(attendanceRef);
+        batch.delete(participationRef);
 
         warzoneSnap.forEach((doc) => {
           const data = doc.data() || {};
@@ -101,6 +106,14 @@
           const nextParticipations = { ...data.participations };
           delete nextParticipations[playerId];
           batch.set(doc.ref, { participations: nextParticipations }, { merge: true });
+        });
+
+        desertSnap.forEach((doc) => {
+          const data = doc.data() || {};
+          if (!data.participationResults || !data.participationResults[playerId]) return;
+          const nextResults = { ...data.participationResults };
+          delete nextResults[playerId];
+          batch.set(doc.ref, { participationResults: nextResults }, { merge: true });
         });
 
         return batch.commit();
@@ -126,6 +139,17 @@
 
       setTeamsMeta: (payload) => firestore.doc('teams/meta').set(payload, { merge: true }),
 
+      createDesertHistoryEvent: (payload) => firestore.collection('desert_history').add({
+        ...payload,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }),
+
+      updateDesertHistoryEvent: (eventId, payload) => firestore.collection('desert_history').doc(eventId).set({
+        ...payload,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }),
+
       upsertWarzoneEvent: (eventId, payload) => firestore.collection('warzone_events').doc(eventId).set({
         ...payload,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -137,6 +161,19 @@
         const batch = firestore.batch();
         entries.forEach(([playerId, stats]) => {
           batch.set(firestore.collection('attendance_stats').doc(playerId), {
+            ...stats,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        });
+        return batch.commit();
+      },
+
+      setParticipationStats: async (statsMap) => {
+        const entries = Object.entries(statsMap || {});
+        if (!entries.length) return;
+        const batch = firestore.batch();
+        entries.forEach(([playerId, stats]) => {
+          batch.set(firestore.collection('participation_stats').doc(playerId), {
             ...stats,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });

@@ -488,6 +488,47 @@ select:focus {
   color: #b8ffce;
 }
 
+.participation-card {
+  background: #111111;
+}
+
+.participation-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.history-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.history-detail-head {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.history-player-row {
+  background: #111111;
+}
+
+.history-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.history-edit-row select {
+  min-width: 220px;
+}
+
+.compact-toggle label {
+  padding-right: 6px;
+}
+
 .attendance-controls {
   align-items: stretch;
 }
@@ -623,6 +664,10 @@ select:focus {
   .summary-grid-4 {
     grid-template-columns: 1fr;
   }
+
+  .participation-breakdown {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 700px) {
@@ -646,5 +691,9 @@ select:focus {
 @media (min-width: 980px) {
   .team-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .history-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
