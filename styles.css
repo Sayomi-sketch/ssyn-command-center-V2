@@ -1,0 +1,394 @@
+:root {
+  color-scheme: dark;
+  --bg: #06070b;
+  --bg-soft: rgba(255,255,255,0.05);
+  --panel: rgba(18, 20, 28, 0.8);
+  --panel-strong: rgba(24, 27, 37, 0.95);
+  --text: #f6f4ff;
+  --muted: #9ca3af;
+  --accent: #7c3aed;
+  --accent-soft: rgba(124, 58, 237, 0.22);
+  --border: rgba(255,255,255,0.12);
+  --shadow: 0 20px 45px rgba(0,0,0,0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.28), transparent 28%),
+    linear-gradient(135deg, #05060a 0%, #090b12 48%, #030408 100%);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.glass-card {
+  background: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.topbar,
+.section-header,
+.controls-card,
+.info-card,
+.form-card,
+.team-column,
+.player-card,
+.list-empty {
+  padding: 16px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), #9b5cff);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.brand-block h1,
+.section-header h2,
+.list-header h3,
+.team-title {
+  margin: 0;
+}
+
+.brand-block p,
+.list-header p,
+.info-card p,
+.eyebrow,
+.team-meta,
+.player-meta,
+.helper-text {
+  margin: 0;
+  color: var(--muted);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.76rem;
+  margin-bottom: 4px;
+}
+
+.brand-pill {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #d7c4ff;
+  font-size: 0.82rem;
+}
+
+.tab-nav {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.tab-button {
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 10px 12px;
+  transition: 180ms ease;
+}
+
+.tab-button.active {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primary-btn,
+.secondary-btn,
+.icon-btn,
+.move-btn,
+.toggle-btn {
+  border-radius: 999px;
+  padding: 10px 14px;
+  transition: transform 180ms ease, background 180ms ease;
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, var(--accent), #8f5cff);
+  color: white;
+}
+
+.secondary-btn,
+.icon-btn,
+.move-btn,
+.toggle-btn {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+
+.primary-btn:hover,
+.secondary-btn:hover,
+.icon-btn:hover,
+.move-btn:hover,
+.toggle-btn:hover {
+  transform: translateY(-1px);
+}
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hidden {
+  display: none;
+}
+
+.input-row {
+  display: grid;
+  gap: 12px;
+}
+
+.input-row.single {
+  grid-template-columns: 1fr;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid rgba(124,58,237,0.4);
+  border-color: var(--accent);
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.controls-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.player-card,
+.registration-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.04);
+  padding: 14px;
+}
+
+.player-top,
+.registration-top,
+.row-actions,
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-name,
+.registration-name {
+  font-weight: 700;
+}
+
+.player-stats,
+.registration-meta {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+
+.checkbox-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkbox-block label {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text);
+}
+
+.checkbox-block input[type="checkbox"] {
+  width: auto;
+}
+
+.list-empty {
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 20px;
+  color: var(--muted);
+}
+
+.team-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.team-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 220px;
+}
+
+.team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.team-player-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+}
+
+.team-player-card .row-actions {
+  margin-top: 8px;
+}
+
+.saved-badge {
+  color: #b8ffce;
+}
+
+@media (min-width: 700px) {
+  .app-shell {
+    padding: 24px;
+  }
+
+  .input-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .controls-card {
+    flex-direction: row;
+  }
+
+  .team-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 980px) {
+  .team-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#06070b" />
+    <title>SSYN Command Center</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar glass-card">
+        <div class="brand-block">
+          <div class="brand-mark">SSYN</div>
+          <div>
+            <h1>Command Center</h1>
+            <p>Mobile-ready operations hub</p>
+          </div>
+        </div>
+        <div class="brand-pill">Live</div>
+      </header>
+
+      <nav class="tab-nav glass-card" aria-label="Main navigation">
+        <button class="tab-button active" data-target="roster-view">Alliance Roster</button>
+        <button class="tab-button" data-target="desert-view">Desert Storm</button>
+        <button class="tab-button" data-target="teams-view">Team Builder</button>
+      </nav>
+
+      <main class="content">
+        <section id="roster-view" class="view active">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Permanent roster</p>
+              <h2>Alliance Roster</h2>
+            </div>
+            <button class="primary-btn" id="toggle-roster-form">Add Player</button>
+          </div>
+
+          <form id="roster-form" class="glass-card form-card">
+            <input type="hidden" id="player-id" />
+            <div class="input-row">
+              <label>
+                Player Name
+                <input id="player-name" required placeholder="Enter player name" />
+              </label>
+              <label>
+                Rank
+                <input id="player-rank" required placeholder="e.g. Captain" />
+              </label>
+            </div>
+            <div class="input-row single">
+              <label>
+                THP
+                <input id="player-thp" required type="number" min="0" placeholder="0" />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="primary-btn">Save Player</button>
+              <button type="button" class="secondary-btn" id="cancel-edit">Cancel</button>
+            </div>
+          </form>
+
+          <div class="glass-card controls-card">
+            <input id="roster-search" placeholder="Search players" />
+            <select id="roster-sort">
+              <option value="name">Sort by Name</option>
+              <option value="thp-desc">Sort by THP ↓</option>
+              <option value="thp-asc">Sort by THP ↑</option>
+              <option value="rank">Sort by Rank</option>
+            </select>
+          </div>
+
+          <div id="roster-list" class="stack"></div>
+        </section>
+
+        <section id="desert-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Event registration</p>
+              <h2>Desert Storm</h2>
+            </div>
+          </div>
+
+          <div class="glass-card form-card">
+            <div class="input-row">
+              <label>
+                Event Date
+                <input id="event-date" type="date" />
+              </label>
+              <label>
+                Time Slot
+                <select id="event-time">
+                  <option value="09:00">09:00</option>
+                  <option value="18:00">18:00</option>
+                  <option value="23:00">23:00</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="list-header">
+              <h3>Registration List</h3>
+              <p>Every change is saved automatically.</p>
+            </div>
+            <div id="desert-list" class="stack"></div>
+          </div>
+        </section>
+
+        <section id="teams-view" class="view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Team generation</p>
+              <h2>Team Builder</h2>
+            </div>
+            <div class="button-group">
+              <button class="secondary-btn" id="generate-teams">Generate Teams</button>
+              <button class="secondary-btn" id="regenerate-teams">Regenerate Teams</button>
+              <button class="primary-btn" id="save-teams">Save Teams</button>
+            </div>
+          </div>
+
+          <div class="glass-card info-card">
+            <p>Only requested players are eligible. Guaranteed players are always included, and left out players become guaranteed next round.</p>
+          </div>
+
+          <div class="team-grid">
+            <div class="glass-card team-column">
+              <div class="team-title">Team A</div>
+              <div class="team-meta">20 starters • up to 10 subs</div>
+              <div id="team-a-list" class="team-list"></div>
+            </div>
+            <div class="glass-card team-column">
+              <div class="team-title">Team B</div>
+              <div class="team-meta">20 starters • up to 10 subs</div>
+              <div id="team-b-list" class="team-list"></div>
+            </div>
+            <div class="glass-card team-column">
+              <div class="team-title">Subs</div>
+              <div class="team-meta">Flexible reserves</div>
+              <div id="subs-list" class="team-list"></div>
+            </div>
+            <div class="glass-card team-column">
+              <div class="team-title">Left Out</div>
+              <div class="team-meta">Guaranteed next round</div>
+              <div id="left-out-list" class="team-list"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
