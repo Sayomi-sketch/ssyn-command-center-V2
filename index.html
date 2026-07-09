@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#06070b" />
     <title>SSYN Command Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -20,237 +23,456 @@
         <div class="brand-pill">Live</div>
       </header>
 
-      <nav class="tab-nav glass-card" aria-label="Main navigation">
-        <button class="tab-button active" data-target="roster-view">Alliance Roster</button>
-        <button class="tab-button" data-target="desert-view">Desert Storm</button>
-        <button class="tab-button" data-target="teams-view">Team Builder</button>
-        <button class="tab-button" data-target="warzone-view">Warzone</button>
-        <button class="tab-button" data-target="attendance-view">Attendance</button>
-        <button class="tab-button" data-target="participation-view">Participation</button>
-        <button class="tab-button" data-target="history-view">History</button>
-      </nav>
-
       <main class="content">
-        <section id="roster-view" class="view active">
+        <section id="home-view" class="main-view active">
           <div class="section-header glass-card">
             <div>
-              <p class="eyebrow">Permanent roster</p>
-              <h2>Alliance Roster</h2>
-            </div>
-            <div class="button-group">
-              <button class="secondary-btn" id="open-archived-view">Archived Players</button>
-              <button class="primary-btn" id="toggle-roster-form">Add Player</button>
+              <p class="eyebrow">Alliance Overview</p>
+              <h2>Operations Dashboard</h2>
+              <p class="section-subtitle">Real-time command snapshot across roster, events, participation, and readiness.</p>
             </div>
           </div>
 
-          <form id="roster-form" class="glass-card form-card">
-            <input type="hidden" id="player-id" />
-            <div class="input-row">
-              <label>
-                Player Name
-                <input id="player-name" required placeholder="Enter player name" />
-              </label>
-              <label>
-                Rank
-                <select id="player-rank" required>
-                  <option value="R1">R1 — New Member</option>
-                  <option value="R2">R2 — Lower Rank</option>
-                  <option value="R3">R3 — Member</option>
-                  <option value="R4">R4 — Officer</option>
-                  <option value="R5">R5 — Alliance Leader</option>
+          <div class="dashboard-grid">
+            <article class="glass-card dashboard-card stat-card">
+              <p class="eyebrow">Alliance Status</p>
+              <h3>Total Members</h3>
+              <div class="dashboard-value" id="home-total-members">0</div>
+              <p class="dashboard-meta" id="home-member-detail">0 active • 0 archived</p>
+            </article>
+
+            <article class="glass-card dashboard-card">
+              <p class="eyebrow desert-brand">Desert Storm</p>
+              <h3>Upcoming Events</h3>
+              <ul class="dashboard-list events-list">
+                <li>Desert Storm</li>
+                <li>Canyon Storm</li>
+                <li>Warzone Duel</li>
+                <li>Season Land</li>
+              </ul>
+            </article>
+
+            <article class="glass-card dashboard-card stat-card">
+              <p class="eyebrow">Participation Overview</p>
+              <h3>Readiness</h3>
+              <div class="dashboard-kpis">
+                <div>
+                  <span class="kpi-label">Attendance</span>
+                  <span class="kpi-value" id="home-attendance-rate">--</span>
+                </div>
+                <div>
+                  <span class="kpi-label">Weekly Participation</span>
+                  <span class="kpi-value" id="home-weekly-participation">--</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="glass-card dashboard-card stat-card">
+              <p class="eyebrow">Leaderboard</p>
+              <h3>Highest <span class="star-inline">⭐</span> Points</h3>
+              <div class="dashboard-value" id="home-top-stars">0</div>
+              <p class="dashboard-meta" id="home-top-player">No data yet</p>
+            </article>
+
+            <article class="glass-card dashboard-card">
+              <p class="eyebrow">Recent Activity</p>
+              <h3>Latest Changes</h3>
+              <ul class="dashboard-list" id="home-recent-activity">
+                <li>No activity recorded yet.</li>
+              </ul>
+            </article>
+
+            <article class="glass-card dashboard-card">
+              <p class="eyebrow">Reminders</p>
+              <h3>Command Notes</h3>
+              <ul class="dashboard-list" id="home-reminders">
+                <li>Save Desert Storm teams before opening event participation.</li>
+                <li>Audit attendance after each Warzone Duel save.</li>
+                <li>Archive inactive players to keep roster operations clean.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section id="alliance-view" class="main-view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Alliance</p>
+              <h2>Alliance Management</h2>
+            </div>
+          </div>
+
+          <div id="alliance-scope" class="subnav-scope">
+            <nav class="tab-nav glass-card sub-tab-nav" aria-label="Alliance navigation">
+              <button class="tab-button active" data-sub-scope="alliance-scope" data-sub-target="roster-view">Roster</button>
+              <button class="tab-button" data-sub-scope="alliance-scope" data-sub-target="archived-view">Archived Players</button>
+            </nav>
+
+            <section id="roster-view" class="sub-view active">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Permanent roster</p>
+                  <h2 id="roster-title">Alliance Roster (0 / 100)</h2>
+                </div>
+                <div class="button-group">
+                  <button class="secondary-btn" id="open-archived-view">Archived Players</button>
+                  <button class="primary-btn" id="toggle-roster-form">Add Player</button>
+                </div>
+              </div>
+
+              <form id="roster-form" class="glass-card form-card">
+                <input type="hidden" id="player-id" />
+                <div class="input-row">
+                  <label>
+                    Player Name
+                    <input id="player-name" required placeholder="Enter player name" />
+                  </label>
+                  <label>
+                    Rank
+                    <select id="player-rank" required>
+                      <option value="R1">R1 — New Member</option>
+                      <option value="R2">R2 — Lower Rank</option>
+                      <option value="R3">R3 — Member</option>
+                      <option value="R4">R4 — Officer</option>
+                      <option value="R5">R5 — Alliance Leader</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="input-row single">
+                  <label>
+                    THP
+                    <input id="player-thp" required type="number" min="0" placeholder="0" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="primary-btn">Save Player</button>
+                  <button type="button" class="secondary-btn" id="cancel-edit">Cancel</button>
+                </div>
+              </form>
+
+              <div class="glass-card controls-card">
+                <input id="roster-search" placeholder="Search players" />
+                <select id="roster-sort">
+                  <option value="name">Sort by Name</option>
+                  <option value="thp-desc">Sort by THP ↓</option>
+                  <option value="thp-asc">Sort by THP ↑</option>
+                  <option value="rank-asc">Sort by Rank ↑</option>
+                  <option value="rank-desc">Sort by Rank ↓</option>
                 </select>
-              </label>
-            </div>
-            <div class="input-row single">
-              <label>
-                THP
-                <input id="player-thp" required type="number" min="0" placeholder="0" />
-              </label>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="primary-btn">Save Player</button>
-              <button type="button" class="secondary-btn" id="cancel-edit">Cancel</button>
-            </div>
-          </form>
+              </div>
 
-          <div class="glass-card controls-card">
-            <input id="roster-search" placeholder="Search players" />
-            <select id="roster-sort">
-              <option value="name">Sort by Name</option>
-              <option value="thp-desc">Sort by THP ↓</option>
-              <option value="thp-asc">Sort by THP ↑</option>
-              <option value="rank-asc">Sort by Rank ↑</option>
-              <option value="rank-desc">Sort by Rank ↓</option>
-            </select>
+              <div id="roster-list" class="stack"></div>
+            </section>
+
+            <section id="archived-view" class="sub-view">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Archive</p>
+                  <h2>Archived Players</h2>
+                </div>
+                <button class="secondary-btn" id="back-to-roster">Back to Roster</button>
+              </div>
+
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Archived Players</h3>
+                  <p>Archived players stay out of active workflows while keeping their history intact.</p>
+                </div>
+                <div id="archived-list" class="stack"></div>
+              </div>
+            </section>
           </div>
-
-          <div id="roster-list" class="stack"></div>
         </section>
 
-        <section id="desert-view" class="view">
+        <section id="desert-storm-view" class="main-view">
           <div class="section-header glass-card">
             <div>
-              <p class="eyebrow">Event registration</p>
-              <h2>Desert Storm</h2>
+              <p class="eyebrow">Desert Storm</p>
+              <h2>Desert Storm Operations</h2>
             </div>
           </div>
 
-          <div class="glass-card form-card">
-            <div class="input-row">
-              <label>
-                Event Date
-                <input id="event-date" type="date" />
-              </label>
-              <label>
-                Time Slot
-                <select id="event-time">
-                  <option value="09:00">09:00</option>
-                  <option value="18:00">18:00</option>
-                  <option value="23:00">23:00</option>
+          <div id="desert-scope" class="subnav-scope">
+            <nav class="tab-nav glass-card sub-tab-nav" aria-label="Desert Storm navigation">
+              <button class="tab-button active" data-sub-scope="desert-scope" data-sub-target="desert-view">Registration</button>
+              <button class="tab-button" data-sub-scope="desert-scope" data-sub-target="teams-view">Team Builder</button>
+              <button class="tab-button" data-sub-scope="desert-scope" data-sub-target="participation-view">Participation</button>
+            </nav>
+
+            <section id="desert-view" class="sub-view active">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Event registration</p>
+                  <h2>Desert Storm</h2>
+                </div>
+              </div>
+
+              <div class="glass-card form-card">
+                <div class="input-row">
+                  <label>
+                    Event Date
+                    <input id="event-date" type="date" />
+                  </label>
+                  <label>
+                    Time Slot
+                    <select id="event-time">
+                      <option value="09:00">09:00</option>
+                      <option value="18:00">18:00</option>
+                      <option value="23:00">23:00</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div id="desert-filter-bar" class="glass-card controls-card filter-bar-card"></div>
+
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Registration List</h3>
+                  <p>Every change is saved automatically.</p>
+                </div>
+                <div id="desert-list" class="stack"></div>
+              </div>
+            </section>
+
+            <section id="teams-view" class="sub-view">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Team generation</p>
+                  <h2>Team Builder</h2>
+                </div>
+                <div class="button-group">
+                  <button class="secondary-btn" id="generate-teams">Generate Teams</button>
+                  <button class="secondary-btn" id="regenerate-teams">Regenerate Teams</button>
+                  <button class="primary-btn" id="save-teams">Save Teams</button>
+                </div>
+              </div>
+
+              <div class="glass-card info-card">
+                <p>Only players marked Requested to Fight are eligible. Guaranteed Next Round players are prioritized into starter slots first, and left out players are automatically guaranteed next round.</p>
+                <div class="checkbox-block compact-toggle" style="margin-top:10px;">
+                  <label>
+                    <span>Use Participation Score as Tie Breaker</span>
+                    <input id="use-participation-tiebreak" type="checkbox" />
+                  </label>
+                </div>
+                <div class="team-stats" style="margin-top:10px; display:flex; gap:12px; flex-wrap:wrap;">
+                  <div class="team-stat">Team A THP: <strong id="team-a-thp">0</strong></div>
+                  <div class="team-stat">Team B THP: <strong id="team-b-thp">0</strong></div>
+                  <div class="team-stat">THP Difference: <strong id="thp-diff">0</strong></div>
+                </div>
+              </div>
+
+              <div class="team-grid">
+                <div class="glass-card team-column">
+                  <div class="team-title">Team A</div>
+                  <div class="team-meta">20 starters • up to 10 subs</div>
+                  <div id="team-a-list" class="team-list"></div>
+                </div>
+                <div class="glass-card team-column">
+                  <div class="team-title">Team B</div>
+                  <div class="team-meta">20 starters • up to 10 subs</div>
+                  <div id="team-b-list" class="team-list"></div>
+                </div>
+                <div class="glass-card team-column">
+                  <div class="team-title">Left Out</div>
+                  <div class="team-meta">Guaranteed next round</div>
+                  <div id="left-out-list" class="team-list"></div>
+                </div>
+              </div>
+            </section>
+
+            <section id="participation-view" class="sub-view">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Desert Storm Only</p>
+                  <h2>Participation</h2>
+                </div>
+                <div class="button-group">
+                  <button class="primary-btn" id="save-desert-event">Save Event</button>
+                </div>
+              </div>
+
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Current Event</h3>
+                  <p id="participation-event-meta">No active Desert Storm event. Save teams first.</p>
+                </div>
+              </div>
+
+              <div id="participation-list" class="stack"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="canyon-storm-view" class="main-view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Canyon Storm</p>
+              <h2>Canyon Storm</h2>
+            </div>
+          </div>
+
+          <div id="canyon-scope" class="subnav-scope">
+            <nav class="tab-nav glass-card sub-tab-nav" aria-label="Canyon Storm navigation">
+              <button class="tab-button active" data-sub-scope="canyon-scope" data-sub-target="canyon-registration-view">Registration</button>
+              <button class="tab-button" data-sub-scope="canyon-scope" data-sub-target="canyon-team-builder-view">Team Builder</button>
+              <button class="tab-button" data-sub-scope="canyon-scope" data-sub-target="canyon-participation-view">Participation</button>
+            </nav>
+
+            <section id="canyon-registration-view" class="sub-view active">
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Registration</h3>
+                  <p>Placeholder page for Canyon Storm registration.</p>
+                </div>
+              </div>
+            </section>
+
+            <section id="canyon-team-builder-view" class="sub-view">
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Team Builder</h3>
+                  <p>Placeholder page for Canyon Storm team builder.</p>
+                </div>
+              </div>
+            </section>
+
+            <section id="canyon-participation-view" class="sub-view">
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Participation</h3>
+                  <p>Placeholder page for Canyon Storm participation.</p>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="warzone-duel-view" class="main-view">
+          <section id="warzone-view" class="sub-view active">
+            <div class="section-header glass-card">
+              <div>
+                <p class="eyebrow">Event tracking</p>
+                <h2>Warzone Duel</h2>
+              </div>
+              <div class="button-group">
+                <button class="secondary-btn" id="toggle-warzone-history">History</button>
+                <button class="secondary-btn hidden" id="new-warzone">New Warzone</button>
+                <button class="primary-btn" id="save-warzone">Save Warzone</button>
+              </div>
+            </div>
+
+            <div class="glass-card form-card">
+              <div class="input-row">
+                <label>
+                  Warzone Date
+                  <input id="warzone-date" type="date" />
+                </label>
+                <label>
+                  Opponent Server
+                  <input id="warzone-opponent" placeholder="Server 641" />
+                </label>
+              </div>
+              <p class="helper-text" id="warzone-status-note">Set participation for each active player, then save the event.</p>
+            </div>
+
+            <div class="glass-card hidden" id="warzone-history-panel">
+              <div class="list-header">
+                <h3>Warzone History</h3>
+                <p>Select an event to view or edit saved participation.</p>
+              </div>
+              <div id="warzone-history-list" class="stack"></div>
+            </div>
+
+            <div id="warzone-filter-bar" class="glass-card controls-card filter-bar-card"></div>
+
+            <div class="glass-card">
+              <div class="list-header">
+                <h3>Player List</h3>
+                <p>Active players come directly from the Alliance Roster.</p>
+              </div>
+              <div id="warzone-player-list" class="stack"></div>
+            </div>
+          </section>
+        </section>
+
+        <section id="season-land-view" class="main-view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Season Land</p>
+              <h2>Season Land</h2>
+            </div>
+          </div>
+
+          <div class="glass-card">
+            <div class="list-header">
+              <h3>Season Land Placeholder</h3>
+              <p>This section is reserved for future Season Land workflows.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="participation-main-view" class="main-view">
+          <div class="section-header glass-card">
+            <div>
+              <p class="eyebrow">Participation</p>
+              <h2>Participation & Attendance</h2>
+            </div>
+          </div>
+
+          <div id="participation-scope" class="subnav-scope">
+            <nav class="tab-nav glass-card sub-tab-nav" aria-label="Participation navigation">
+              <button class="tab-button active" data-sub-scope="participation-scope" data-sub-target="participation-analytics-view">Analytics (Placeholder)</button>
+              <button class="tab-button" data-sub-scope="participation-scope" data-sub-target="attendance-view">Attendance</button>
+            </nav>
+
+            <section id="participation-analytics-view" class="sub-view active">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Analytics</p>
+                  <h2>Main Participation</h2>
+                </div>
+              </div>
+
+              <div class="glass-card">
+                <div class="list-header">
+                  <h3>Participation Analytics Coming Soon</h3>
+                  <p>Planned: overall participation percentages, combined Desert Storm + Canyon Storm points, rankings, and statistics.</p>
+                </div>
+              </div>
+            </section>
+
+            <section id="attendance-view" class="sub-view">
+              <div class="section-header glass-card">
+                <div>
+                  <p class="eyebrow">Statistics only</p>
+                  <h2>Attendance</h2>
+                </div>
+              </div>
+
+              <div class="glass-card">
+                <div id="attendance-summary" class="summary-grid summary-grid-4"></div>
+              </div>
+
+              <div class="glass-card controls-card attendance-controls">
+                <input id="attendance-search" placeholder="Search player name" />
+                <select id="attendance-sort">
+                  <option value="name-asc">Name A-Z</option>
+                  <option value="name-desc">Name Z-A</option>
+                  <option value="attendance-desc">Attendance Highest-Lowest</option>
+                  <option value="attendance-asc">Attendance Lowest-Highest</option>
+                  <option value="thp-desc">THP Highest-Lowest</option>
+                  <option value="thp-asc">THP Lowest-Highest</option>
                 </select>
-              </label>
-            </div>
-          </div>
+              </div>
 
-          <div class="glass-card">
-            <div class="list-header">
-              <h3>Registration List</h3>
-              <p>Every change is saved automatically.</p>
-            </div>
-            <div id="desert-list" class="stack"></div>
+              <div id="attendance-list" class="stack"></div>
+            </section>
           </div>
         </section>
 
-        <section id="teams-view" class="view">
-          <div class="section-header glass-card">
-            <div>
-              <p class="eyebrow">Team generation</p>
-              <h2>Team Builder</h2>
-            </div>
-            <div class="button-group">
-              <button class="secondary-btn" id="generate-teams">Generate Teams</button>
-              <button class="secondary-btn" id="regenerate-teams">Regenerate Teams</button>
-              <button class="primary-btn" id="save-teams">Save Teams</button>
-            </div>
-          </div>
-
-          <div class="glass-card info-card">
-            <p>Only players marked Requested to Fight are eligible. Guaranteed Next Round players are prioritized into starter slots first, and left out players are automatically guaranteed next round.</p>
-            <div class="checkbox-block compact-toggle" style="margin-top:10px;">
-              <label>
-                <span>Use Participation Score as Tie Breaker</span>
-                <input id="use-participation-tiebreak" type="checkbox" />
-              </label>
-            </div>
-            <div class="team-stats" style="margin-top:10px; display:flex; gap:12px; flex-wrap:wrap;">
-              <div class="team-stat">Team A THP: <strong id="team-a-thp">0</strong></div>
-              <div class="team-stat">Team B THP: <strong id="team-b-thp">0</strong></div>
-              <div class="team-stat">THP Difference: <strong id="thp-diff">0</strong></div>
-            </div>
-          </div>
-
-          <div class="team-grid">
-            <div class="glass-card team-column">
-              <div class="team-title">Team A</div>
-              <div class="team-meta">20 starters • up to 10 subs</div>
-              <div id="team-a-list" class="team-list"></div>
-            </div>
-            <div class="glass-card team-column">
-              <div class="team-title">Team B</div>
-              <div class="team-meta">20 starters • up to 10 subs</div>
-              <div id="team-b-list" class="team-list"></div>
-            </div>
-            <div class="glass-card team-column">
-              <div class="team-title">Left Out</div>
-              <div class="team-meta">Guaranteed next round</div>
-              <div id="left-out-list" class="team-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <section id="warzone-view" class="view">
-          <div class="section-header glass-card">
-            <div>
-              <p class="eyebrow">Event tracking</p>
-              <h2>Warzone</h2>
-            </div>
-            <div class="button-group">
-              <button class="secondary-btn" id="toggle-warzone-history">History</button>
-              <button class="secondary-btn hidden" id="new-warzone">New Warzone</button>
-              <button class="primary-btn" id="save-warzone">Save Warzone</button>
-            </div>
-          </div>
-
-          <div class="glass-card form-card">
-            <div class="input-row">
-              <label>
-                Warzone Date
-                <input id="warzone-date" type="date" />
-              </label>
-              <label>
-                Opponent Server
-                <input id="warzone-opponent" placeholder="Server 641" />
-              </label>
-            </div>
-            <p class="helper-text" id="warzone-status-note">Set participation for each active player, then save the event.</p>
-          </div>
-
-          <div class="glass-card hidden" id="warzone-history-panel">
-            <div class="list-header">
-              <h3>Warzone History</h3>
-              <p>Select an event to view or edit saved participation.</p>
-            </div>
-            <div id="warzone-history-list" class="stack"></div>
-          </div>
-
-          <div class="glass-card">
-            <div class="list-header">
-              <h3>Player List</h3>
-              <p>Active players come directly from the Alliance Roster.</p>
-            </div>
-            <div id="warzone-player-list" class="stack"></div>
-          </div>
-        </section>
-
-        <section id="attendance-view" class="view">
-          <div class="section-header glass-card">
-            <div>
-              <p class="eyebrow">Statistics only</p>
-              <h2>Attendance</h2>
-            </div>
-          </div>
-
-          <div class="glass-card">
-            <div id="attendance-summary" class="summary-grid summary-grid-4"></div>
-          </div>
-
-          <div class="glass-card controls-card attendance-controls">
-            <input id="attendance-search" placeholder="Search player name" />
-            <select id="attendance-sort">
-              <option value="name-asc">Name A-Z</option>
-              <option value="name-desc">Name Z-A</option>
-              <option value="attendance-desc">Attendance Highest-Lowest</option>
-              <option value="attendance-asc">Attendance Lowest-Highest</option>
-              <option value="thp-desc">THP Highest-Lowest</option>
-              <option value="thp-asc">THP Lowest-Highest</option>
-            </select>
-          </div>
-
-          <div id="attendance-list" class="stack"></div>
-        </section>
-
-        <section id="participation-view" class="view">
-          <div class="section-header glass-card">
-            <div>
-              <p class="eyebrow">Desert Storm Only</p>
-              <h2>Participation</h2>
-            </div>
-          </div>
-
-          <div id="participation-list" class="stack"></div>
-        </section>
-
-        <section id="history-view" class="view">
+        <section id="history-view" class="main-view">
           <div class="section-header glass-card">
             <div>
               <p class="eyebrow">Permanent record book</p>
@@ -258,59 +480,90 @@
             </div>
           </div>
 
-          <div class="history-grid">
-            <div class="glass-card">
-              <div class="list-header">
-                <h3>🌪 Desert Storm History</h3>
-                <p>Every completed event remains editable forever.</p>
+          <details class="glass-card history-collapsible" open>
+            <summary>🌪 Desert Storm</summary>
+            <div class="history-section-content">
+              <div class="history-grid">
+                <div class="glass-card">
+                  <div class="list-header">
+                    <h3>🌪 Desert Storm History</h3>
+                    <p>Every completed event remains editable forever.</p>
+                  </div>
+                  <div id="history-desert-list" class="stack"></div>
+                </div>
               </div>
-              <div id="history-desert-list" class="stack"></div>
-            </div>
 
-            <div class="glass-card">
-              <div class="list-header">
-                <h3>⚔ Warzone History</h3>
-                <p>Select an event to review or edit participation.</p>
+              <div class="glass-card" id="history-desert-detail-card">
+                <div class="list-header">
+                  <h3>Desert Storm Event</h3>
+                  <p id="history-desert-meta">Select a Desert Storm event to view full details.</p>
+                </div>
+                <div id="history-desert-detail" class="stack"></div>
               </div>
-              <div id="history-warzone-list" class="stack"></div>
             </div>
-          </div>
+          </details>
 
-          <div class="glass-card" id="history-desert-detail-card">
-            <div class="list-header">
-              <h3>Desert Storm Event</h3>
-              <p id="history-desert-meta">Select a Desert Storm event to view full details.</p>
+          <details class="glass-card history-collapsible" open>
+            <summary>🏔 Canyon Storm</summary>
+            <div class="history-section-content">
+              <div class="list-empty">Canyon Storm history placeholder.</div>
             </div>
-            <div id="history-desert-detail" class="stack"></div>
-          </div>
+          </details>
 
-          <div class="glass-card" id="history-warzone-detail-card">
-            <div class="list-header">
-              <h3>Warzone Event</h3>
-              <p id="history-warzone-meta">Select a Warzone event to view full details.</p>
+          <details class="glass-card history-collapsible" open>
+            <summary>⚔ Warzone Duel</summary>
+            <div class="history-section-content">
+              <div class="history-grid">
+                <div class="glass-card">
+                  <div class="list-header">
+                    <h3>⚔ Warzone History</h3>
+                    <p>Select an event to review or edit participation.</p>
+                  </div>
+                  <div id="history-warzone-list" class="stack"></div>
+                </div>
+              </div>
+
+              <div class="glass-card" id="history-warzone-detail-card">
+                <div class="list-header">
+                  <h3>Warzone Event</h3>
+                  <p id="history-warzone-meta">Select a Warzone event to view full details.</p>
+                </div>
+                <div id="history-warzone-detail" class="stack"></div>
+              </div>
             </div>
-            <div id="history-warzone-detail" class="stack"></div>
-          </div>
+          </details>
+
+          <details class="glass-card history-collapsible" open>
+            <summary>🌍 Season Land</summary>
+            <div class="history-section-content">
+              <div class="list-empty">Season Land history placeholder.</div>
+            </div>
+          </details>
         </section>
 
-        <section id="archived-view" class="view">
+        <section id="settings-view" class="main-view">
           <div class="section-header glass-card">
-            <div>
-              <p class="eyebrow">Archive</p>
-              <h2>Archived Players</h2>
-            </div>
-            <button class="secondary-btn" id="back-to-roster">Back to Roster</button>
-          </div>
-
-          <div class="glass-card">
             <div class="list-header">
-              <h3>Archived Players</h3>
-              <p>Archived players stay out of active workflows while keeping their history intact.</p>
+              <h3>Settings</h3>
+              <p>Placeholder page for future settings controls.</p>
             </div>
-            <div id="archived-list" class="stack"></div>
           </div>
         </section>
+
+
       </main>
+
+      <nav class="tab-nav glass-card bottom-nav" aria-label="Main navigation">
+        <button class="tab-button active" data-main-target="home-view"><span class="nav-icon">⌂</span><span class="nav-label">Home</span></button>
+        <button class="tab-button" data-main-target="alliance-view"><span class="nav-icon">⚑</span><span class="nav-label">Alliance</span></button>
+        <button class="tab-button" data-main-target="desert-storm-view"><span class="nav-icon">◇</span><span class="nav-label">Desert</span></button>
+        <button class="tab-button" data-main-target="canyon-storm-view"><span class="nav-icon">△</span><span class="nav-label">Canyon</span></button>
+        <button class="tab-button" data-main-target="warzone-duel-view"><span class="nav-icon">✦</span><span class="nav-label">Warzone</span></button>
+        <button class="tab-button" data-main-target="season-land-view"><span class="nav-icon">◌</span><span class="nav-label">Season</span></button>
+        <button class="tab-button" data-main-target="participation-main-view"><span class="nav-icon">◫</span><span class="nav-label">Part.</span></button>
+        <button class="tab-button" data-main-target="history-view"><span class="nav-icon">☰</span><span class="nav-label">History</span></button>
+        <button class="tab-button" data-main-target="settings-view"><span class="nav-icon">⚙</span><span class="nav-label">Settings</span></button>
+      </nav>
     </div>
 
     <div id="archive-match-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="archive-match-title">
@@ -324,6 +577,37 @@
           <button class="secondary-btn" id="cancel-archive-match">Cancel</button>
           <button class="secondary-btn" id="create-new-player">Create New Player</button>
           <button class="primary-btn" id="restore-archived-player">Restore Player</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="archive-note-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="archive-note-title">
+      <div class="glass-card modal-card">
+        <div>
+          <p class="eyebrow">Archived Player Note</p>
+          <h3 id="archive-note-title">Archive Note</h3>
+        </div>
+        <label>
+          Note
+          <textarea id="archive-note-input" rows="4" maxlength="240" placeholder="Add an optional note..."></textarea>
+        </label>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="cancel-archive-note">Cancel</button>
+          <button class="primary-btn" id="save-archive-note">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="archive-delete-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="archive-delete-title">
+      <div class="glass-card modal-card">
+        <div>
+          <h3 id="archive-delete-title">Delete Archived Player?</h3>
+        </div>
+        <p>Are you sure you want to permanently delete this archived player?</p>
+        <p>This action cannot be undone.</p>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="cancel-archive-delete">Cancel</button>
+          <button class="secondary-btn" id="confirm-archive-delete">Delete</button>
         </div>
       </div>
     </div>

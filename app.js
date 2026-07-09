@@ -22,6 +22,33 @@ const PARTICIPATION_POINTS = {
   [PARTICIPATION_STATUS.didNotRegister]: 0
 };
 
+const MAX_ALLIANCE_SIZE = 100;
+
+const FILTER_STORAGE_KEY = 'ssyn.filters.v1';
+
+function defaultFilters() {
+  return {
+    desert: {
+      search: '',
+      ranks: [],
+      flags: { playing: false, guaranteed: false, notPlaying: false },
+      sort: { key: 'name', dir: 'asc' }
+    },
+    warzone: {
+      search: '',
+      ranks: [],
+      flags: {},
+      sort: { key: 'name', dir: 'asc' }
+    },
+    participation: {
+      search: '',
+      ranks: [],
+      flags: {},
+      sort: { key: 'score', dir: 'desc' }
+    }
+  };
+}
+
 const state = {
   roster: [],
   archived: [],
@@ -43,6 +70,9 @@ const state = {
     events: [],
     selectedEventId: ''
   },
+  desertCurrent: {
+    event: null
+  },
   attendance: {
     stats: {},
     persistedSignature: ''
@@ -54,23 +84,32 @@ const state = {
   history: {
     selectedWarzoneId: ''
   },
+  filters: defaultFilters(),
   ui: {
     pendingArchivedMatchId: '',
-    pendingPlayerDraft: null
+    pendingPlayerDraft: null,
+    pendingArchiveDeleteId: '',
+    pendingArchiveNoteId: ''
   }
 };
 
 let archiveModalEventsBound = false;
+let archiveNoteModalEventsBound = false;
+let archiveDeleteModalEventsBound = false;
 
 function init() {
+  loadFilterState();
   bindNavigation();
   bindRoster();
   bindDesert();
   bindTeams();
   bindWarzone();
   bindAttendance();
+  bindParticipation();
   bindArchived();
   bindArchiveModal();
+  bindArchiveNoteModal();
+  bindArchiveDeleteModal();
   renderAll();
   initFirebaseListeners();
 }
@@ -99,6 +138,7 @@ function initFirebaseListeners() {
       players.push({
         ...normalizePlayer(doc.id, data),
         archivedAt: data.archivedAt || null,
+        archiveNote: data.archiveNote || '',
         lastKnownRank: data.lastKnownRank || data.rankValue || data.rank || 'R1',
         lastKnownThp: Number(data.lastKnownThp ?? data.thp) || 0
       });
@@ -109,6 +149,7 @@ function initFirebaseListeners() {
       return rv - lv || left.name.localeCompare(right.name);
     });
     recomputeAllStats();
+    renderRoster();
     renderArchived();
     renderHistory();
   });
@@ -133,6 +174,21 @@ function initFirebaseListeners() {
     state.desert.eventDate = data.eventDate || '';
     state.desert.timeSlot = data.timeSlot || '18:00';
     renderDesert();
+  });
+
+  window.db.onDesertCurrentSnapshot((doc) => {
+    if (!doc.exists) {
+      state.desertCurrent.event = null;
+      renderParticipation();
+      return;
+    }
+
+    const data = doc.data() || {};
+    state.desertCurrent.event = normalizeCurrentDesertEvent({
+      id: doc.id,
+      ...data
+    });
+    renderParticipation();
   });
 
   window.db.onTeamsAssignmentsSnapshot((snap) => {
@@ -203,6 +259,8 @@ function initFirebaseListeners() {
         id: doc.id,
         eventDate: data.eventDate || '',
         eventTime: data.eventTime || '18:00',
+        registeredCount: Number(data.registeredCount) || 0,
+        guaranteedCount: Number(data.guaranteedCount) || 0,
         teamA: data.teamA || [],
         teamB: data.teamB || [],
         leftOut: data.leftOut || [],
@@ -226,6 +284,7 @@ function initFirebaseListeners() {
     }
 
     recomputeParticipationStats();
+    renderDesert();
     renderParticipation();
     renderHistory();
     renderTeams();
@@ -234,9 +293,16 @@ function initFirebaseListeners() {
 }
 
 function bindNavigation() {
-  document.querySelectorAll('.tab-button').forEach((button) => {
-    button.addEventListener('click', () => openView(button.dataset.target));
+  document.querySelectorAll('[data-main-target]').forEach((button) => {
+    button.addEventListener('click', () => openView(button.dataset.mainTarget));
   });
+
+  document.querySelectorAll('[data-sub-scope][data-sub-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openSubView(button.dataset.subScope, button.dataset.subTarget);
+    });
+  });
+
 }
 
 function bindRoster() {
@@ -250,7 +316,10 @@ function bindRoster() {
   });
 
   cancel.addEventListener('click', resetRosterForm);
-  document.getElementById('open-archived-view').addEventListener('click', () => openView('archived-view'));
+  document.getElementById('open-archived-view').addEventListener('click', () => {
+    openView('alliance-view');
+    openSubView('alliance-scope', 'archived-view');
+  });
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -319,7 +388,7 @@ function bindTeams() {
         useParticipationTiebreak: state.teams.useParticipationTiebreak
       }).catch((err) => console.error('set teams meta', err));
     }
-    createDesertHistoryFromCurrentTeams();
+    prepareDesertParticipationFromCurrentTeams();
     renderTeams();
   });
 
@@ -357,8 +426,18 @@ function bindAttendance() {
   document.getElementById('attendance-sort').addEventListener('change', renderAttendance);
 }
 
+function bindParticipation() {
+  const saveButton = document.getElementById('save-desert-event');
+  if (saveButton) {
+    saveButton.addEventListener('click', saveDesertEvent);
+  }
+}
+
 function bindArchived() {
-  document.getElementById('back-to-roster').addEventListener('click', () => openView('roster-view'));
+  document.getElementById('back-to-roster').addEventListener('click', () => {
+    openView('alliance-view');
+    openSubView('alliance-scope', 'roster-view');
+  });
 }
 
 function bindArchiveModal() {
@@ -402,16 +481,72 @@ function bindArchiveModal() {
   archiveModalEventsBound = true;
 }
 
+function bindArchiveNoteModal() {
+  if (archiveNoteModalEventsBound) return;
+
+  const modal = document.getElementById('archive-note-modal');
+  const cancelButton = document.getElementById('cancel-archive-note');
+  const saveButton = document.getElementById('save-archive-note');
+  const input = document.getElementById('archive-note-input');
+  if (!modal || !cancelButton || !saveButton || !input) return;
+
+  cancelButton.addEventListener('click', closeArchiveNoteModal);
+  saveButton.addEventListener('click', saveArchiveNote);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeArchiveNoteModal();
+  });
+
+  archiveNoteModalEventsBound = true;
+}
+
+function bindArchiveDeleteModal() {
+  if (archiveDeleteModalEventsBound) return;
+
+  const modal = document.getElementById('archive-delete-modal');
+  const cancelButton = document.getElementById('cancel-archive-delete');
+  const confirmButton = document.getElementById('confirm-archive-delete');
+  if (!modal || !cancelButton || !confirmButton) return;
+
+  cancelButton.addEventListener('click', closeArchiveDeleteModal);
+  confirmButton.addEventListener('click', () => {
+    const id = state.ui.pendingArchiveDeleteId;
+    closeArchiveDeleteModal();
+    if (id) deleteArchivedPlayerPermanently(id);
+  });
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeArchiveDeleteModal();
+  });
+
+  archiveDeleteModalEventsBound = true;
+}
+
 function openView(targetId) {
-  document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
-  document.querySelectorAll('.tab-button').forEach((button) => {
-    button.classList.toggle('active', button.dataset.target === targetId);
+  document.querySelectorAll('.main-view').forEach((view) => view.classList.remove('active'));
+  document.querySelectorAll('[data-main-target]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.mainTarget === targetId);
   });
   const target = document.getElementById(targetId);
   if (target) target.classList.add('active');
 }
 
+function openSubView(scopeId, targetId) {
+  if (!scopeId || !targetId) return;
+  const scope = document.getElementById(scopeId);
+  if (!scope) return;
+
+  scope.querySelectorAll('.sub-view').forEach((view) => view.classList.remove('active'));
+  scope.querySelectorAll(`[data-sub-scope="${scopeId}"]`).forEach((button) => {
+    button.classList.toggle('active', button.dataset.subTarget === targetId);
+  });
+
+  const target = document.getElementById(targetId);
+  if (target && scope.contains(target)) {
+    target.classList.add('active');
+  }
+}
+
 function renderAll() {
+  renderHome();
   renderRoster();
   renderDesert();
   renderTeams();
@@ -422,10 +557,104 @@ function renderAll() {
   renderArchived();
 }
 
+function renderHome() {
+  const totalMembersEl = document.getElementById('home-total-members');
+  if (!totalMembersEl) return;
+
+  const activeCount = state.roster.length;
+  const archivedCount = state.archived.length;
+  const totalCount = activeCount + archivedCount;
+
+  totalMembersEl.textContent = String(totalCount);
+
+  const memberDetailEl = document.getElementById('home-member-detail');
+  if (memberDetailEl) {
+    memberDetailEl.textContent = `${activeCount} active • ${archivedCount} archived`;
+  }
+
+  const attendanceRateEl = document.getElementById('home-attendance-rate');
+  const activeAttendance = state.roster
+    .map((player) => state.attendance.stats[player.id])
+    .filter((entry) => typeof entry?.attendancePercent === 'number');
+  const averageAttendance = activeAttendance.length
+    ? activeAttendance.reduce((sum, entry) => sum + entry.attendancePercent, 0) / activeAttendance.length
+    : null;
+  if (attendanceRateEl) {
+    attendanceRateEl.textContent = formatAttendancePercent(averageAttendance);
+  }
+
+  const weeklyParticipationEl = document.getElementById('home-weekly-participation');
+  const latestDesertEvent = state.desertHistory.events[0] || null;
+  if (weeklyParticipationEl) {
+    if (!latestDesertEvent) {
+      weeklyParticipationEl.textContent = '--';
+    } else {
+      const entries = Object.values(latestDesertEvent.participationResults || {});
+      const engaged = entries.filter((entry) => {
+        const status = normalizeParticipationStatus(entry.status);
+        return status === PARTICIPATION_STATUS.participated || status === PARTICIPATION_STATUS.late;
+      }).length;
+      const percent = entries.length ? (engaged / entries.length) * 100 : null;
+      weeklyParticipationEl.textContent = formatAttendancePercent(percent);
+    }
+  }
+
+  const topStarsEl = document.getElementById('home-top-stars');
+  const topPlayerEl = document.getElementById('home-top-player');
+  const leaderboard = [...state.roster]
+    .map((player) => ({ player, stars: getCombinedStormPoints(player.id) }))
+    .sort((left, right) => right.stars - left.stars || left.player.name.localeCompare(right.player.name));
+
+  if (topStarsEl && topPlayerEl) {
+    if (!leaderboard.length) {
+      topStarsEl.textContent = '0';
+      topPlayerEl.textContent = 'No data yet';
+    } else {
+      topStarsEl.textContent = `${leaderboard[0].stars}`;
+      topPlayerEl.textContent = leaderboard[0].player.name;
+    }
+  }
+
+  const recentActivityEl = document.getElementById('home-recent-activity');
+  if (recentActivityEl) {
+    const items = [];
+
+    if (state.warzone.events.length) {
+      const latestWarzone = state.warzone.events[0];
+      items.push(`Warzone save: ${formatDateLabel(latestWarzone.eventDate)} vs ${latestWarzone.opponentServer || 'opponent pending'}`);
+    }
+
+    if (state.desertHistory.events.length) {
+      const latestDesert = state.desertHistory.events[0];
+      items.push(`Desert event save: ${formatDateLabel(latestDesert.eventDate)} ${latestDesert.eventTime || ''}`.trim());
+    }
+
+    if (state.desertCurrent.event) {
+      items.push('Desert participation in progress and ready to finalize.');
+    }
+
+    if (state.roster.length) {
+      items.push(`Roster synced: ${state.roster.length} active players available.`);
+    }
+
+    if (!items.length) {
+      items.push('No activity recorded yet.');
+    }
+
+    recentActivityEl.innerHTML = items.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  }
+}
+
 function renderRoster() {
   const list = document.getElementById('roster-list');
+  const rosterTitle = document.getElementById('roster-title');
   const search = document.getElementById('roster-search').value.toLowerCase();
   const sort = document.getElementById('roster-sort').value;
+
+  if (rosterTitle) {
+    const total = state.roster.length;
+    rosterTitle.textContent = `Alliance Roster (${total} / ${MAX_ALLIANCE_SIZE})`;
+  }
 
   const players = [...state.roster]
     .filter((player) => [player.name, player.rank, String(player.thp)].some((value) => value.toLowerCase().includes(search)))
@@ -439,16 +668,16 @@ function renderRoster() {
   list.innerHTML = players.map((player) => {
     const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
     return `
-      <article class="player-card">
-        <div class="player-top">
+      <article class="player-card roster-card">
+        <div class="player-main">
           <div>
-            <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
+            <div class="player-name roster-name">${escapeHtml(player.name)}</div>
+            <div class="player-stats"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
           </div>
-        </div>
-        <div class="row-actions">
-          <button class="secondary-btn" onclick="editPlayer('${player.id}')">Edit</button>
-          <button class="secondary-btn" onclick="archivePlayer('${player.id}')">Remove from Alliance</button>
+          <div class="card-actions-vertical">
+            <button class="primary-btn" onclick="editPlayer('${player.id}')">Edit</button>
+            <button class="secondary-btn" onclick="archivePlayer('${player.id}')">Archive</button>
+          </div>
         </div>
       </article>
     `;
@@ -456,6 +685,21 @@ function renderRoster() {
 }
 
 function renderDesert() {
+  const desertCounts = getDesertFilterCounts();
+  renderFilterBar('desert-filter-bar', 'desert', {
+    sortChips: [
+      { key: 'name', label: 'Name' },
+      { key: 'thp', label: 'THP' },
+      { key: 'score', label: '⭐ Score' }
+    ],
+    extraChips: [
+      { key: 'playing', label: 'Playing' },
+      { key: 'guaranteed', label: 'Guaranteed' },
+      { key: 'notPlaying', label: 'Not Playing' }
+    ],
+    extraChipCounts: desertCounts
+  });
+
   const list = document.getElementById('desert-list');
   document.getElementById('event-date').value = state.desert.eventDate;
   document.getElementById('event-time').value = state.desert.timeSlot;
@@ -465,15 +709,34 @@ function renderDesert() {
     return;
   }
 
-  list.innerHTML = state.roster.map((player) => {
+  const filters = state.filters.desert;
+  const players = [...state.roster]
+    .filter((player) => playerMatchesSearch(player, filters.search))
+    .filter((player) => rankFilterMatch(player, filters.ranks))
+    .filter((player) => {
+      const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
+      if (filters.flags.playing && !registration.requested) return false;
+      if (filters.flags.guaranteed && !registration.guaranteed) return false;
+      if (filters.flags.notPlaying && registration.requested) return false;
+      return true;
+    })
+    .sort((left, right) => compareByFilterSort('desert', left, right));
+
+  if (!players.length) {
+    list.innerHTML = '<div class="list-empty">No players match the current filters.</div>';
+    return;
+  }
+
+  list.innerHTML = players.map((player) => {
     const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
     const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
+    const stormPoints = getCombinedStormPoints(player.id);
     return `
       <article class="registration-row">
         <div class="registration-top">
           <div>
             <div class="registration-name">${escapeHtml(player.name)}</div>
-            <div class="registration-meta"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
+            <div class="registration-meta"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.thp)} • ${formatStarPoints(stormPoints)}</div>
           </div>
         </div>
         <div class="checkbox-block">
@@ -574,13 +837,13 @@ function renderPoolCards(players, pool) {
   return players.map((player) => {
     const assignment = state.teams.assignments[player.id] || { pool, locked: false };
     const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
-    const score = getParticipationScore(player.id);
+    const score = getCombinedStormPoints(player.id);
     return `
       <article class="team-player-card">
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.thp)} • ⭐${score}</div>
+            <div class="player-stats"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.thp)} • ${formatStarPoints(score)}</div>
           </div>
           <div class="chip">${labelForPool(assignment.pool || pool)}</div>
         </div>
@@ -594,6 +857,14 @@ function renderPoolCards(players, pool) {
 }
 
 function renderWarzone() {
+  renderFilterBar('warzone-filter-bar', 'warzone', {
+    sortChips: [
+      { key: 'name', label: 'Name' },
+      { key: 'thp', label: 'THP' }
+    ],
+    extraChips: []
+  });
+
   renderWarzoneHeader();
 
   const historyPanel = document.getElementById('warzone-history-panel');
@@ -639,10 +910,16 @@ function renderWarzoneHistory() {
 
 function renderWarzonePlayers() {
   const list = document.getElementById('warzone-player-list');
-  const players = [...state.roster].sort((left, right) => left.name.localeCompare(right.name));
+  const filters = state.filters.warzone;
+  const players = [...state.roster]
+    .filter((player) => playerMatchesSearch(player, filters.search))
+    .filter((player) => rankFilterMatch(player, filters.ranks))
+    .sort((left, right) => compareByFilterSort('warzone', left, right));
 
   if (!players.length) {
-    list.innerHTML = '<div class="list-empty">Add active players to the Alliance Roster before recording a Warzone.</div>';
+    list.innerHTML = state.roster.length
+      ? '<div class="list-empty">No players match the current filters.</div>'
+      : '<div class="list-empty">Add active players to the Alliance Roster before recording a Warzone.</div>';
     return;
   }
 
@@ -654,7 +931,7 @@ function renderWarzonePlayers() {
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
+            <div class="player-stats"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
           </div>
         </div>
         <div class="warzone-status-group" role="radiogroup" aria-label="${escapeHtml(player.name)} participation status">
@@ -723,7 +1000,7 @@ function renderAttendance() {
           <div class="player-name">${escapeHtml(player.name)}</div>
           <div class="attendance-percent">${formatAttendancePercent(stats.attendancePercent)}</div>
         </div>
-        <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
+        <div class="player-stats"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.thp)}</div>
         <div class="attendance-history">${escapeHtml(formatAttendanceHistory(stats))}</div>
       </article>
     `;
@@ -760,33 +1037,77 @@ function renderAttendanceSummary() {
 
 function renderParticipation() {
   const list = document.getElementById('participation-list');
-  if (!state.roster.length) {
-    list.innerHTML = '<div class="list-empty">No active players available for participation statistics.</div>';
+  const meta = document.getElementById('participation-event-meta');
+  const saveButton = document.getElementById('save-desert-event');
+
+  if (!list) return;
+
+  const currentEvent = state.desertCurrent.event;
+  if (!currentEvent) {
+    if (meta) meta.textContent = 'No active Desert Storm event. Save teams first.';
+    if (saveButton) saveButton.disabled = true;
+    list.innerHTML = '<div class="list-empty">No Desert Storm event in progress.</div>';
     return;
   }
 
-  const players = [...state.roster].sort((left, right) => left.name.localeCompare(right.name));
+  if (meta) {
+    meta.textContent = `${formatDateLabel(currentEvent.eventDate)} • ${currentEvent.eventTime} • Team A THP ${currentEvent.teamATHP} • Team B THP ${currentEvent.teamBTHP} • Diff ${currentEvent.thpDifference}`;
+  }
+  if (saveButton) saveButton.disabled = false;
+
+  const players = Object.values(currentEvent.participationResults || {})
+    .map((entry) => ({
+      playerId: entry.playerId,
+      name: entry.name || '',
+      rank: entry.rank || 'R1',
+      thp: Number(entry.thp) || 0,
+      assignmentTeam: entry.assignmentTeam || '',
+      assignmentRole: entry.assignmentRole || '',
+      status: normalizeParticipationStatus(entry.status)
+    }))
+    .filter((entry) => entry.assignmentTeam && entry.assignmentRole)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  if (!players.length) {
+    list.innerHTML = '<div class="list-empty">No players are attached to this event.</div>';
+    return;
+  }
+
   list.innerHTML = players.map((player) => {
-    const stats = state.participation.stats[player.id] || emptyParticipationStat(player);
-    const rankLabel = escapeHtml(player.rank || player.rankValue || 'R1');
+    const rankLabel = escapeHtml(player.rank || 'R1');
+    const points = PARTICIPATION_POINTS[player.status] || 0;
+    const stormPoints = getCombinedStormPoints(player.playerId);
+    const statuses = [
+      PARTICIPATION_STATUS.participated,
+      PARTICIPATION_STATUS.late,
+      PARTICIPATION_STATUS.noShow,
+      PARTICIPATION_STATUS.excused
+    ];
+
     return `
       <article class="player-card participation-card">
         <div class="player-top">
           <div>
             <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.thp)} • ⭐${stats.score}</div>
+            <div class="player-stats"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.thp)} • ${formatStarPoints(stormPoints)}</div>
+            <div class="player-stats">${escapeHtml(player.assignmentTeam)} • ${escapeHtml(player.assignmentRole)}</div>
           </div>
+          <div class="chip">${points > 0 ? `+${points}` : points}</div>
         </div>
-        <div class="participation-breakdown">
-          <div>Participated: ${stats.participated}</div>
-          <div>Late: ${stats.late}</div>
-          <div>No Shows: ${stats.noShow}</div>
-          <div>Excused: ${stats.excused}</div>
-          <div>Left Out: ${stats.leftOut}</div>
+        <div class="history-edit-row">
+          <select data-current-player-id="${player.playerId}">
+            ${statuses.map((status) => `<option value="${status}" ${status === player.status ? 'selected' : ''}>${participationLabel(status)}</option>`).join('')}
+          </select>
         </div>
       </article>
     `;
   }).join('');
+
+  list.querySelectorAll('select[data-current-player-id]').forEach((select) => {
+    select.addEventListener('change', (event) => {
+      updateCurrentDesertParticipation(event.target.dataset.currentPlayerId, event.target.value);
+    });
+  });
 }
 
 function renderHistory() {
@@ -799,14 +1120,14 @@ function renderHistory() {
 function renderDesertHistoryList() {
   const list = document.getElementById('history-desert-list');
   if (!state.desertHistory.events.length) {
-    list.innerHTML = '<div class="list-empty">No Desert Storm history yet. Save teams after event completion.</div>';
+    list.innerHTML = '<div class="list-empty">No completed Desert Storm events yet.</div>';
     return;
   }
 
   list.innerHTML = state.desertHistory.events.map((event) => `
     <button class="history-entry ${event.id === state.desertHistory.selectedEventId ? 'selected' : ''}" data-event-id="${event.id}">
       <span>${escapeHtml(formatDateLabel(event.eventDate))} • ${escapeHtml(event.eventTime)}</span>
-      <span>Diff ${Math.abs(Number(event.thpDifference) || 0)}</span>
+      <span>Reg ${Number(event.registeredCount) || 0} • Gtd ${Number(event.guaranteedCount) || 0} • Diff ${Math.abs(Number(event.thpDifference) || 0)}</span>
     </button>
   `).join('');
 
@@ -852,7 +1173,7 @@ function renderDesertHistoryDetail() {
   }
 
   const leftOutNames = (event.leftOut || []).map((entry) => entry.name).join(', ') || 'None';
-  meta.textContent = `${formatDateLabel(event.eventDate)} • ${event.eventTime} • Team A THP ${event.teamATHP} • Team B THP ${event.teamBTHP} • Diff ${event.thpDifference}`;
+  meta.textContent = `${formatDateLabel(event.eventDate)} • ${event.eventTime} • Registered ${Number(event.registeredCount) || 0} • Guaranteed ${Number(event.guaranteedCount) || 0} • Team A THP ${event.teamATHP} • Team B THP ${event.teamBTHP} • Diff ${event.thpDifference}`;
 
   const rows = Object.entries(event.participationResults || {})
     .map(([playerId, entry]) => ({
@@ -974,28 +1295,31 @@ function renderArchived() {
     return;
   }
 
-  const players = [...state.archived].sort((left, right) => left.name.localeCompare(right.name));
+  const players = [...state.archived].sort((left, right) => {
+    const dv = toMillis(right.archivedAt) - toMillis(left.archivedAt);
+    if (dv !== 0) return dv;
+    return left.name.localeCompare(right.name);
+  });
   list.innerHTML = players.map((player) => {
-    const attendance = state.attendance.stats[player.id] || emptyAttendanceStat(player);
-    const participation = state.participation.stats[player.id] || emptyParticipationStat(player);
     const rankLabel = escapeHtml(player.lastKnownRank || player.rank || player.rankValue || 'R1');
+    const note = String(player.archiveNote || '').trim();
     return `
       <article class="player-card archived-card">
-        <div class="player-top">
+        <div class="archived-date">Archived ${escapeHtml(formatDateLabelFromAny(player.archivedAt))}</div>
+        <div class="player-main">
           <div>
-            <div class="player-name">${escapeHtml(player.name)}</div>
-            <div class="player-stats"><span class="rank-badge rank-${rankLabel}">${rankLabel}</span> • THP ${formatThp(player.lastKnownThp ?? player.thp)}</div>
+            <div class="player-name archived-name">${escapeHtml(player.name)}</div>
+            <div class="player-stats"><span class="rank-badge ${rankBadgeClass(rankLabel)}">${rankLabel}</span> • THP ${formatThp(player.lastKnownThp ?? player.thp)}</div>
           </div>
-          <div class="archived-meta">⭐${participation.score}</div>
+          <div class="card-actions-vertical">
+            <button class="primary-btn" onclick="restoreArchivedPlayer('${player.id}')">Restore</button>
+            <button class="secondary-btn" onclick="promptDeleteArchivedPlayer('${player.id}')">Delete</button>
+          </div>
         </div>
-        <div class="archived-details">
-          <div>Archived Date: ${escapeHtml(formatDateTimeLabel(player.archivedAt))}</div>
-          <div>Warzone Attendance: ${escapeHtml(formatAttendancePercent(attendance.attendancePercent))}</div>
-          <div>Participation Score: ⭐${participation.score}</div>
-        </div>
-        <div class="row-actions">
-          <button class="secondary-btn" onclick="restoreArchivedPlayer('${player.id}')">Restore Player</button>
-          <button class="secondary-btn danger-btn" onclick="deleteArchivedPlayerPermanently('${player.id}')">Delete Permanently</button>
+
+        <div class="archived-note-row">
+          ${note ? `<div class="archived-note">📝 ${escapeHtml(note)}</div>` : ''}
+          <button class="chip-btn" onclick="openArchiveNoteModal('${player.id}')">${note ? 'Edit Note' : 'Add Note'}</button>
         </div>
       </article>
     `;
@@ -1075,6 +1399,7 @@ function archivePlayer(playerId) {
   state.archived.push({
     ...player,
     archivedAt: new Date().toISOString(),
+    archiveNote: '',
     lastKnownRank: player.rankValue || player.rank || 'R1',
     lastKnownThp: Number(player.thp) || 0
   });
@@ -1102,27 +1427,12 @@ function restoreArchivedPlayer(playerId) {
 }
 
 function deleteArchivedPlayerPermanently(playerId) {
-  if (!window.confirm('Delete this archived player permanently? This cannot be undone.')) return;
-
   if (window.db && window.db.permanentlyDeleteArchivedPlayer) {
     window.db.permanentlyDeleteArchivedPlayer(playerId).catch((err) => console.error('delete archived player', err));
     return;
   }
 
   state.archived = state.archived.filter((entry) => entry.id !== playerId);
-  state.warzone.events = state.warzone.events.map((event) => {
-    if (!event.participations || !event.participations[playerId]) return event;
-    const next = { ...event.participations };
-    delete next[playerId];
-    return { ...event, participations: next };
-  });
-  state.desertHistory.events = state.desertHistory.events.map((event) => {
-    if (!event.participationResults || !event.participationResults[playerId]) return event;
-    const next = { ...event.participationResults };
-    delete next[playerId];
-    return { ...event, participationResults: next };
-  });
-
   recomputeAllStats();
   renderAll();
 }
@@ -1179,11 +1489,11 @@ function persistSelectedWarzone() {
   }).catch((err) => console.error('persist warzone', err));
 }
 
-function createDesertHistoryFromCurrentTeams() {
-  if (!state.desert.eventDate || !state.desert.timeSlot) return;
+function buildDesertEventFromCurrentTeams() {
+  if (!state.desert.eventDate || !state.desert.timeSlot) return null;
 
   const includedPlayers = getIncludedPlayers();
-  if (!includedPlayers.length) return;
+  if (!includedPlayers.length) return null;
 
   const byPool = {
     teamAStarter: [],
@@ -1201,31 +1511,40 @@ function createDesertHistoryFromCurrentTeams() {
   const teamA = [...byPool.teamAStarter, ...byPool.teamASub].map(toHistoryPlayer);
   const teamB = [...byPool.teamBStarter, ...byPool.teamBSub].map(toHistoryPlayer);
   const leftOut = [...byPool.leftOut].map(toHistoryPlayer);
+  const registeredCount = includedPlayers.length;
+  const guaranteedCount = includedPlayers.filter((player) => state.desert.registrations[player.id]?.guaranteed).length;
 
   const participationResults = {};
-  state.roster.forEach((player) => {
-    const registration = state.desert.registrations[player.id] || { requested: false };
-    let status = PARTICIPATION_STATUS.didNotRegister;
-    if (registration.requested) {
-      const pool = normalizePool(state.teams.assignments[player.id]?.pool || 'leftOut');
-      status = pool === 'leftOut' ? PARTICIPATION_STATUS.leftOut : PARTICIPATION_STATUS.participated;
-    }
+  const poolsToTeam = {
+    teamAStarter: { team: 'Team A', role: 'Starter' },
+    teamASub: { team: 'Team A', role: 'Sub' },
+    teamBStarter: { team: 'Team B', role: 'Starter' },
+    teamBSub: { team: 'Team B', role: 'Sub' }
+  };
 
-    participationResults[player.id] = {
-      playerId: player.id,
-      name: player.name,
-      rank: player.rankValue || player.rank || 'R1',
-      thp: Number(player.thp) || 0,
-      status,
-      points: PARTICIPATION_POINTS[status] || 0
-    };
+  Object.entries(poolsToTeam).forEach(([pool, assignment]) => {
+    (byPool[pool] || []).forEach((player) => {
+      const status = PARTICIPATION_STATUS.participated;
+      participationResults[player.id] = {
+        playerId: player.id,
+        name: player.name,
+        rank: player.rankValue || player.rank || 'R1',
+        thp: Number(player.thp) || 0,
+        assignmentTeam: assignment.team,
+        assignmentRole: assignment.role,
+        status,
+        points: PARTICIPATION_POINTS[status] || 0
+      };
+    });
   });
 
   const teamATHP = sumPlayers(teamA);
   const teamBTHP = sumPlayers(teamB);
-  const payload = {
+  return {
     eventDate: state.desert.eventDate,
     eventTime: state.desert.timeSlot,
+    registeredCount,
+    guaranteedCount,
     teamA,
     teamB,
     leftOut,
@@ -1234,13 +1553,119 @@ function createDesertHistoryFromCurrentTeams() {
     thpDifference: Math.abs(teamATHP - teamBTHP),
     participationResults
   };
+}
+
+function normalizeCurrentDesertEvent(event) {
+  if (!event) return null;
+  const normalizedResults = {};
+  Object.entries(event.participationResults || {}).forEach(([playerId, entry]) => {
+    normalizedResults[playerId] = {
+      ...entry,
+      assignmentTeam: entry.assignmentTeam || '',
+      assignmentRole: entry.assignmentRole || '',
+      status: normalizeParticipationStatus(entry.status)
+    };
+  });
+
+  return {
+    id: event.id || 'current_event',
+    eventDate: event.eventDate || '',
+    eventTime: event.eventTime || state.desert.timeSlot || '18:00',
+    registeredCount: Number(event.registeredCount) || 0,
+    guaranteedCount: Number(event.guaranteedCount) || 0,
+    teamA: event.teamA || [],
+    teamB: event.teamB || [],
+    leftOut: event.leftOut || [],
+    teamATHP: Number(event.teamATHP) || 0,
+    teamBTHP: Number(event.teamBTHP) || 0,
+    thpDifference: Number(event.thpDifference) || 0,
+    participationResults: normalizedResults
+  };
+}
+
+function prepareDesertParticipationFromCurrentTeams() {
+  const payload = buildDesertEventFromCurrentTeams();
+  if (!payload) return;
+
+  if (window.db && window.db.setDesertCurrentEvent) {
+    window.db.setDesertCurrentEvent(payload).catch((err) => console.error('set current desert event', err));
+  } else {
+    state.desertCurrent.event = normalizeCurrentDesertEvent(payload);
+    renderParticipation();
+  }
+
+  openView('desert-storm-view');
+  openSubView('desert-scope', 'participation-view');
+}
+
+function updateCurrentDesertParticipation(playerId, statusValue) {
+  const current = state.desertCurrent.event;
+  if (!current || !current.participationResults[playerId]) return;
+
+  const status = normalizeParticipationStatus(statusValue);
+  const updated = {
+    ...current.participationResults,
+    [playerId]: {
+      ...current.participationResults[playerId],
+      status,
+      points: PARTICIPATION_POINTS[status] || 0
+    }
+  };
+
+  if (window.db && window.db.setDesertCurrentEvent) {
+    window.db.setDesertCurrentEvent({ participationResults: updated }).catch((err) => console.error('update current desert participation', err));
+    return;
+  }
+
+  state.desertCurrent.event = {
+    ...current,
+    participationResults: updated
+  };
+  renderParticipation();
+}
+
+function saveDesertEvent() {
+  const current = state.desertCurrent.event;
+  if (!current) return;
+
+  const payload = {
+    eventDate: current.eventDate,
+    eventTime: current.eventTime,
+    registeredCount: Number(current.registeredCount) || 0,
+    guaranteedCount: Number(current.guaranteedCount) || 0,
+    teamA: current.teamA || [],
+    teamB: current.teamB || [],
+    leftOut: current.leftOut || [],
+    teamATHP: Number(current.teamATHP) || 0,
+    teamBTHP: Number(current.teamBTHP) || 0,
+    thpDifference: Number(current.thpDifference) || 0,
+    participationResults: cloneObject(current.participationResults || {})
+  };
 
   if (window.db && window.db.createDesertHistoryEvent) {
     window.db.createDesertHistoryEvent(payload)
-      .then(() => {
+      .then((docRef) => {
+        const localEvent = {
+          ...payload,
+          id: docRef?.id || crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        state.desertHistory.events = [localEvent, ...state.desertHistory.events.filter((event) => event.id !== localEvent.id)];
+        state.desertHistory.selectedEventId = localEvent.id;
+        state.desertCurrent.event = null;
+        recomputeParticipationStats();
+        renderDesert();
+        renderTeams();
+        renderParticipation();
+        renderHistory();
+        renderArchived();
+        if (window.db && window.db.clearDesertCurrentEvent) {
+          window.db.clearDesertCurrentEvent().catch((err) => console.error('clear current desert event', err));
+        }
         openView('history-view');
       })
-      .catch((err) => console.error('create desert history', err));
+      .catch((err) => console.error('save completed desert event', err));
     return;
   }
 
@@ -1252,9 +1677,13 @@ function createDesertHistoryFromCurrentTeams() {
   };
   state.desertHistory.events.unshift(localEvent);
   state.desertHistory.selectedEventId = localEvent.id;
+  state.desertCurrent.event = null;
   recomputeParticipationStats();
   renderParticipation();
   renderHistory();
+  renderTeams();
+  renderArchived();
+  openView('history-view');
 }
 
 function updateDesertHistoryParticipation(eventId, playerId, statusValue) {
@@ -1621,6 +2050,8 @@ function recomputeParticipationStats() {
       stat.thp = Number(entry.thp ?? stat.thp) || 0;
       stat.totalEvents += 1;
       stat.score += PARTICIPATION_POINTS[status] || 0;
+      stat.stormPoints = stat.score;
+      stat.combinedStormPoints = stat.score;
 
       if (status === PARTICIPATION_STATUS.participated) stat.participated += 1;
       if (status === PARTICIPATION_STATUS.late) stat.late += 1;
@@ -1676,7 +2107,9 @@ function persistParticipationStats(stats) {
       excused: stat.excused,
       leftOut: stat.leftOut,
       didNotRegister: stat.didNotRegister,
-      totalEvents: stat.totalEvents
+      totalEvents: stat.totalEvents,
+      stormPoints: stat.stormPoints,
+      combinedStormPoints: stat.combinedStormPoints
     };
   });
 
@@ -1796,7 +2229,9 @@ function emptyParticipationStat(player) {
     excused: 0,
     leftOut: 0,
     didNotRegister: 0,
-    totalEvents: 0
+    totalEvents: 0,
+    stormPoints: 0,
+    combinedStormPoints: 0
   };
 }
 
@@ -1838,12 +2273,265 @@ function formatDateTimeLabel(value) {
   return new Date(millis).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+function formatDateLabelFromAny(value) {
+  const millis = toMillis(value);
+  if (!millis) return 'Unknown';
+  return new Date(millis).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function rankBadgeClass(rankValue) {
+  const rank = String(rankValue || 'R1').toLowerCase();
+  return `rank-${rank}`;
+}
+
+function playerMatchesSearch(player, search) {
+  const value = String(search || '').trim().toLowerCase();
+  if (!value) return true;
+  return [player.name, player.rank, String(player.thp)]
+    .map((entry) => String(entry || '').toLowerCase())
+    .some((entry) => entry.includes(value));
+}
+
+function rankFilterMatch(player, selectedRanks) {
+  if (!Array.isArray(selectedRanks) || !selectedRanks.length) return true;
+  const rank = String(player.rank || player.rankValue || 'R1').toUpperCase();
+  return selectedRanks.includes(rank);
+}
+
+function compareByFilterSort(scope, left, right) {
+  const sort = state.filters[scope]?.sort || { key: 'name', dir: 'asc' };
+  const dir = sort.dir === 'desc' ? -1 : 1;
+  let cmp = 0;
+
+  if (sort.key === 'thp') {
+    cmp = (Number(left.thp) || 0) - (Number(right.thp) || 0);
+  } else if (sort.key === 'score') {
+    cmp = getParticipationScore(left.id) - getParticipationScore(right.id);
+  } else {
+    cmp = String(left.name || '').localeCompare(String(right.name || ''));
+  }
+
+  if (cmp === 0) {
+    cmp = String(left.name || '').localeCompare(String(right.name || ''));
+  }
+  return cmp * dir;
+}
+
+function renderFilterBar(containerId, scope, config) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const current = state.filters[scope] || defaultFilters()[scope];
+  const ranks = ['R5', 'R4', 'R3', 'R2', 'R1'];
+  const sortChips = config.sortChips || [];
+  const extraChips = config.extraChips || [];
+  const extraChipCounts = config.extraChipCounts || {};
+  const defaults = defaultFilters()[scope] || { search: '', ranks: [], flags: {}, sort: { key: 'name', dir: 'asc' } };
+  const hasFlags = Object.values(current.flags || {}).some(Boolean);
+  const hasNonDefaultSort = current.sort?.key !== defaults.sort.key || current.sort?.dir !== defaults.sort.dir;
+  const hasActive = Boolean((current.search || '').trim()) || (current.ranks || []).length > 0 || hasFlags || hasNonDefaultSort;
+
+  container.innerHTML = `
+    <div class="filter-bar-grid">
+      <input class="filter-search" data-filter-scope="${scope}" placeholder="Search" value="${escapeHtml(current.search || '')}" />
+      <div class="filter-chip-row">
+        ${ranks.map((rank) => `<button class="filter-chip ${(current.ranks || []).includes(rank) ? 'active' : ''}" data-filter-scope="${scope}" data-filter-type="rank" data-filter-value="${rank}">${rank}</button>`).join('')}
+      </div>
+      ${extraChips.length ? `<div class="filter-chip-row">${extraChips.map((chip) => {
+        const count = Number(extraChipCounts[chip.key]);
+        const label = Number.isFinite(count) ? `${chip.label} (${count})` : chip.label;
+        return `<button class="filter-chip ${(current.flags || {})[chip.key] ? 'active' : ''}" data-filter-scope="${scope}" data-filter-type="flag" data-filter-value="${chip.key}">${label}</button>`;
+      }).join('')}</div>` : ''}
+      <div class="filter-chip-row">
+        ${sortChips.map((chip) => {
+          const isActive = current.sort?.key === chip.key;
+          const direction = isActive ? (current.sort.dir === 'desc' ? ' ↓' : ' ↑') : '';
+          return `<button class="filter-chip sort-chip ${isActive ? 'active' : ''}" data-filter-scope="${scope}" data-filter-type="sort" data-filter-value="${chip.key}">${chip.label}${direction}</button>`;
+        }).join('')}
+      </div>
+      ${hasActive ? `<div class="filter-clear-wrap"><button class="secondary-btn filter-clear" data-filter-scope="${scope}" data-filter-type="clear">Clear Filters</button></div>` : ''}
+    </div>
+  `;
+
+  const searchInput = container.querySelector('.filter-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', (event) => {
+      const next = String(event.target.value || '');
+      state.filters[scope].search = next;
+      saveFilterState();
+      renderByScope(scope);
+    });
+  }
+
+  container.querySelectorAll('button[data-filter-type]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const type = button.dataset.filterType;
+      const value = button.dataset.filterValue;
+      if (type === 'rank') {
+        const ranksSet = new Set(state.filters[scope].ranks || []);
+        if (ranksSet.has(value)) ranksSet.delete(value);
+        else ranksSet.add(value);
+        state.filters[scope].ranks = Array.from(ranksSet);
+      } else if (type === 'flag') {
+        state.filters[scope].flags[value] = !state.filters[scope].flags[value];
+      } else if (type === 'sort') {
+        const currentSort = state.filters[scope].sort || { key: 'name', dir: 'asc' };
+        if (currentSort.key === value) {
+          currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          const defaultsForScope = defaultFilters()[scope] || { sort: { key: 'name', dir: 'asc' } };
+          currentSort.key = value;
+          currentSort.dir = value === defaultsForScope.sort.key ? defaultsForScope.sort.dir : 'asc';
+        }
+        state.filters[scope].sort = currentSort;
+      } else if (type === 'clear') {
+        state.filters[scope] = cloneObject(defaultFilters()[scope]);
+      }
+      saveFilterState();
+      renderByScope(scope);
+    });
+  });
+}
+
+function renderByScope(scope) {
+  if (scope === 'desert') {
+    renderDesert();
+    return;
+  }
+  if (scope === 'warzone') {
+    renderWarzone();
+    return;
+  }
+  if (scope === 'participation') {
+    renderParticipation();
+  }
+}
+
+function loadFilterState() {
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_KEY);
+    if (!raw) {
+      state.filters = defaultFilters();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    const defaults = defaultFilters();
+    state.filters = {
+      desert: {
+        ...defaults.desert,
+        ...(parsed.desert || {}),
+        flags: { ...defaults.desert.flags, ...((parsed.desert || {}).flags || {}) },
+        sort: { ...defaults.desert.sort, ...((parsed.desert || {}).sort || {}) }
+      },
+      warzone: {
+        ...defaults.warzone,
+        ...(parsed.warzone || {}),
+        flags: { ...defaults.warzone.flags, ...((parsed.warzone || {}).flags || {}) },
+        sort: { ...defaults.warzone.sort, ...((parsed.warzone || {}).sort || {}) }
+      },
+      participation: {
+        ...defaults.participation,
+        ...(parsed.participation || {}),
+        flags: { ...defaults.participation.flags, ...((parsed.participation || {}).flags || {}) },
+        sort: { ...defaults.participation.sort, ...((parsed.participation || {}).sort || {}) }
+      }
+    };
+  } catch (error) {
+    console.error('load filters', error);
+    state.filters = defaultFilters();
+  }
+}
+
+function saveFilterState() {
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(state.filters));
+  } catch (error) {
+    console.error('save filters', error);
+  }
+}
+
+function openArchiveNoteModal(playerId) {
+  const player = state.archived.find((entry) => entry.id === playerId);
+  const modal = document.getElementById('archive-note-modal');
+  const input = document.getElementById('archive-note-input');
+  if (!player || !modal || !input) return;
+  state.ui.pendingArchiveNoteId = playerId;
+  input.value = String(player.archiveNote || '');
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeArchiveNoteModal() {
+  const modal = document.getElementById('archive-note-modal');
+  state.ui.pendingArchiveNoteId = '';
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function saveArchiveNote() {
+  const playerId = state.ui.pendingArchiveNoteId;
+  const input = document.getElementById('archive-note-input');
+  if (!playerId || !input) return;
+  const note = String(input.value || '').trim();
+
+  if (window.db && window.db.setArchivedPlayerNote) {
+    window.db.setArchivedPlayerNote(playerId, note)
+      .then(closeArchiveNoteModal)
+      .catch((err) => console.error('save archive note', err));
+    return;
+  }
+
+  state.archived = state.archived.map((entry) => (
+    entry.id === playerId ? { ...entry, archiveNote: note } : entry
+  ));
+  closeArchiveNoteModal();
+  renderArchived();
+}
+
+function promptDeleteArchivedPlayer(playerId) {
+  const modal = document.getElementById('archive-delete-modal');
+  if (!modal) return;
+  state.ui.pendingArchiveDeleteId = playerId;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeArchiveDeleteModal() {
+  const modal = document.getElementById('archive-delete-modal');
+  state.ui.pendingArchiveDeleteId = '';
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
 function getParticipationScore(playerId) {
   return Number(state.participation.stats[playerId]?.score) || 0;
 }
 
+function getCombinedStormPoints(playerId) {
+  return Number(state.participation.stats[playerId]?.combinedStormPoints) || 0;
+}
+
 function sumParticipation(players) {
   return players.reduce((sum, player) => sum + getParticipationScore(player.id), 0);
+}
+
+function getDesertFilterCounts() {
+  const counts = {
+    playing: 0,
+    guaranteed: 0,
+    notPlaying: 0
+  };
+
+  state.roster.forEach((player) => {
+    const registration = state.desert.registrations[player.id] || { requested: false, guaranteed: false };
+    if (registration.requested) counts.playing += 1;
+    if (registration.guaranteed) counts.guaranteed += 1;
+    if (!registration.requested) counts.notPlaying += 1;
+  });
+
+  return counts;
 }
 
 function findArchivedPlayerByName(name) {
@@ -2040,6 +2728,8 @@ window.toggleLock = toggleLock;
 window.movePlayer = movePlayer;
 window.restoreArchivedPlayer = restoreArchivedPlayer;
 window.deleteArchivedPlayerPermanently = deleteArchivedPlayerPermanently;
+window.openArchiveNoteModal = openArchiveNoteModal;
+window.promptDeleteArchivedPlayer = promptDeleteArchivedPlayer;
 window.openArchiveMatchModal = openArchiveMatchModal;
 window.closeArchiveMatchModal = closeArchiveMatchModal;
 

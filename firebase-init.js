@@ -32,6 +32,7 @@
       onArchivedSnapshot: (cb) => firestore.collection('archived_players').onSnapshot(cb),
       onRegistrationsSnapshot: (cb) => firestore.collection('desert_registrations').onSnapshot(cb),
       onDesertMetaSnapshot: (cb) => firestore.doc('desert/meta').onSnapshot(cb),
+      onDesertCurrentSnapshot: (cb) => firestore.doc('desert/current_event').onSnapshot(cb),
       onTeamsMetaSnapshot: (cb) => firestore.doc('teams/meta').onSnapshot(cb),
       onTeamsAssignmentsSnapshot: (cb) => firestore.collection('teams_assignments').onSnapshot(cb),
       onWarzonesSnapshot: (cb) => firestore.collection('warzone_events').orderBy('eventDate', 'desc').onSnapshot(cb),
@@ -61,6 +62,7 @@
           attendancePercent: attendance.attendancePercent ?? null,
           participated: Number(attendance.participated) || 0,
           eligibleWarzones: Number(attendance.eligibleWarzones) || 0,
+          archiveNote: '',
           archivedAt: firebase.firestore.FieldValue.serverTimestamp(),
           createdAt: player.createdAt || firebase.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
@@ -92,35 +94,27 @@
         const archivedRef = firestore.collection('archived_players').doc(playerId);
         const attendanceRef = firestore.collection('attendance_stats').doc(playerId);
         const participationRef = firestore.collection('participation_stats').doc(playerId);
-        const warzoneSnap = await firestore.collection('warzone_events').get();
-        const desertSnap = await firestore.collection('desert_history').get();
         const batch = firestore.batch();
 
         batch.delete(archivedRef);
         batch.delete(attendanceRef);
         batch.delete(participationRef);
 
-        warzoneSnap.forEach((doc) => {
-          const data = doc.data() || {};
-          if (!data.participations || !data.participations[playerId]) return;
-          const nextParticipations = { ...data.participations };
-          delete nextParticipations[playerId];
-          batch.set(doc.ref, { participations: nextParticipations }, { merge: true });
-        });
-
-        desertSnap.forEach((doc) => {
-          const data = doc.data() || {};
-          if (!data.participationResults || !data.participationResults[playerId]) return;
-          const nextResults = { ...data.participationResults };
-          delete nextResults[playerId];
-          batch.set(doc.ref, { participationResults: nextResults }, { merge: true });
-        });
-
         return batch.commit();
       },
 
+      setArchivedPlayerNote: (playerId, note) => firestore.collection('archived_players').doc(playerId).set({
+        archiveNote: String(note || '').trim(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }),
+
       setRegistration: (playerId, payload) => firestore.collection('desert_registrations').doc(playerId).set(payload, { merge: true }),
       setDesertMeta: (payload) => firestore.doc('desert/meta').set(payload, { merge: true }),
+      setDesertCurrentEvent: (payload) => firestore.doc('desert/current_event').set({
+        ...payload,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }),
+      clearDesertCurrentEvent: () => firestore.doc('desert/current_event').delete(),
 
       setTeamAssignment: (playerId, payload) => firestore.collection('teams_assignments').doc(playerId).set(payload, { merge: true }),
 
